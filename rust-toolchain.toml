@@ -1,0 +1,4 @@
+# MSRV는 1.90 (Cargo.toml rust-version). 개발/CI는 아래 버전으로 고정합니다.
+[toolchain]
+channel = "1.98.1"
+components = ["clippy", "rustfmt"]

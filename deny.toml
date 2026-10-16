@@ -1,0 +1,55 @@
+# cargo-deny 설정: 보안 권고, 라이선스, 출처 검사
+# 실행: cargo deny --manifest-path src-tauri/Cargo.toml check
+
+[graph]
+# 배포 대상 플랫폼만 검사 (macOS 유니버설, Windows)
+targets = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+  "aarch64-pc-windows-msvc",
+]
+all-features = false
+
+[advisories]
+version = 2
+yanked = "deny"
+ignore = [
+  # rsa 크레이트 Marvin 타이밍 공격. russh 0.60+는 상수 시간 구현인 rsa 0.10 RC를
+  # 사용하지만 정식 릴리스가 없어 계속 보고됨. rsa 0.10 정식 출시 후 예외를 제거할 것.
+  # (russh 도입 전에는 "advisory-not-detected" 경고만 출력됨)
+  { id = "RUSTSEC-2023-0071", reason = "russh uses constant-time rsa 0.10 RC; no stable fix release yet" },
+]
+
+[licenses]
+version = 2
+# GPL/LGPL/AGPL 계열은 허용하지 않음. 추가가 필요하면 PR에서 사유를 적습니다.
+allow = [
+  "MIT",
+  "MIT-0",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "Unicode-3.0",
+  "CC0-1.0",
+  "BSL-1.0",
+  "MPL-2.0",
+  "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.9
+# ISC, BSL-1.0, CDLA-Permissive-2.0 등은 이후 단계(russh, ring/aws-lc-rs, webpki-roots)에서 필요
+unused-allowed-license = "allow"
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

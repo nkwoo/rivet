@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  MANIFEST: src-tauri/Cargo.toml
+
+jobs:
+  build:
+    name: Build & test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      # rust-toolchain.toml의 버전/컴포넌트를 사용
+      - name: Install Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+      - name: cargo fmt
+        run: cargo fmt --manifest-path ${{ env.MANIFEST }} --check
+      - name: cargo clippy
+        run: cargo clippy --manifest-path ${{ env.MANIFEST }} --all-targets --locked -- -D warnings
+      - name: cargo test
+        run: cargo test --manifest-path ${{ env.MANIFEST }} --locked
+
+      - name: Tauri build
+        run: npm run tauri build -- --no-bundle
+
+  supply-chain:
+    name: Supply chain checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: npm audit
+        run: npm audit --audit-level=low
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny,cargo-audit
+
+      - name: cargo deny
+        run: cargo deny --manifest-path ${{ env.MANIFEST }} check
+
+      - name: cargo audit
+        run: cargo audit --file src-tauri/Cargo.lock
