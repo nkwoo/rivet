@@ -47,6 +47,7 @@ fn profile(protocol: Protocol) -> Profile {
         tags: vec![],
         notes: String::new(),
         favorite: false,
+        rdp: None,
         created_at: 0,
         updated_at: 0,
     }

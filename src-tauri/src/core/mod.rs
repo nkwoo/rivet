@@ -88,6 +88,7 @@ mod tests {
                 tags: vec![],
                 notes: String::new(),
                 favorite: false,
+                rdp: None,
             })
             .unwrap();
         secrets.set(&p.id, &SecretString::from("pw")).unwrap();

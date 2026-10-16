@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rdp-resize"
+description = "Enables the rdp_resize command without any pre-configured scope."
+commands.allow = ["rdp_resize"]
+
+[[permission]]
+identifier = "deny-rdp-resize"
+description = "Denies the rdp_resize command without any pre-configured scope."
+commands.deny = ["rdp_resize"]

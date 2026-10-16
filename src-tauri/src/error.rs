@@ -1,4 +1,5 @@
 use crate::protocols::ftp::FtpError;
+use crate::protocols::rdp::RdpError;
 use crate::protocols::ssh::SshError;
 use crate::protocols::FsError;
 
@@ -39,6 +40,9 @@ pub enum Error {
 
     #[error(transparent)]
     Ftp(#[from] FtpError),
+
+    #[error(transparent)]
+    Rdp(#[from] RdpError),
 }
 
 impl Error {
@@ -53,6 +57,7 @@ impl Error {
             Error::Ssh(e) => e.code(),
             Error::Fs(e) => e.code(),
             Error::Ftp(e) => e.code(),
+            Error::Rdp(e) => e.code(),
         }
     }
 }

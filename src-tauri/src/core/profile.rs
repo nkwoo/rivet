@@ -18,6 +18,9 @@ const MAX_GROUP: usize = 64;
 const MAX_TAGS: usize = 16;
 const MAX_TAG: usize = 32;
 const MAX_NOTES: usize = 4096;
+/// RDP 해상도 범위 ([MS-RDPEDISP] 2.2.2.2.1과 같은 기준)
+const RDP_MIN_DIM: u16 = 200;
+const RDP_MAX_DIM: u16 = 8192;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -79,6 +82,44 @@ impl AuthMethod {
     }
 }
 
+/// RDP 화면 설정
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RdpSettings {
+    /// 고정 해상도. 없으면 탭 크기에 맞추고 탭 크기가 바뀌면 원격 해상도도 바꿉니다.
+    #[serde(default)]
+    pub width: Option<u16>,
+    #[serde(default)]
+    pub height: Option<u16>,
+    /// 원격 화면 배율(%) 100~500. 없으면 100%, `hidpi`면 디스플레이 배율을 따릅니다.
+    #[serde(default)]
+    pub scale: Option<u16>,
+    /// 창에 맞춤일 때 Retina 등 고해상도 디스플레이의 실제 픽셀 수로 접속
+    #[serde(default)]
+    pub hidpi: bool,
+}
+
+impl RdpSettings {
+    fn check(&self) -> Result<()> {
+        let dim = |n: u16| (RDP_MIN_DIM..=RDP_MAX_DIM).contains(&n);
+        match (self.width, self.height) {
+            (None, None) => {}
+            (Some(w), Some(h)) if dim(w) && dim(h) && w % 2 == 0 => {}
+            _ => {
+                return Err(Error::Invalid(format!(
+                    "RDP resolution must be an even width and height in {RDP_MIN_DIM}-{RDP_MAX_DIM}"
+                )))
+            }
+        }
+        if let Some(scale) = self.scale {
+            if !(100..=500).contains(&scale) {
+                return Err(Error::Invalid("RDP scale must be 100-500%".into()));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// 저장된 연결 프로필. 비밀 값 필드는 의도적으로 없습니다.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -95,6 +136,8 @@ pub struct Profile {
     pub tags: Vec<String>,
     pub notes: String,
     pub favorite: bool,
+    /// RDP 프로필의 화면 설정 (다른 프로토콜은 `None`)
+    pub rdp: Option<RdpSettings>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -120,6 +163,8 @@ pub struct ProfileInput {
     pub notes: String,
     #[serde(default)]
     pub favorite: bool,
+    #[serde(default)]
+    pub rdp: Option<RdpSettings>,
 }
 
 impl ProfileInput {
@@ -167,6 +212,14 @@ impl ProfileInput {
                 return Err(Error::Invalid("key file is required for key auth".into()));
             }
         }
+        if self.protocol == Protocol::Rdp {
+            if self.auth_method != AuthMethod::Password {
+                return Err(Error::Invalid("RDP supports password auth only".into()));
+            }
+            self.rdp.unwrap_or_default().check()?;
+        } else {
+            self.rdp = None;
+        }
         Ok(self)
     }
 }
@@ -207,7 +260,7 @@ pub struct ProfileStore {
 }
 
 const COLUMNS: &str = "id, name, protocol, host, port, username, auth_method, key_path, \
-                       group_name, tags, notes, favorite, created_at, updated_at";
+                       group_name, tags, notes, favorite, created_at, updated_at, rdp_settings";
 
 impl ProfileStore {
     pub fn new(db: Arc<Database>) -> Self {
@@ -244,9 +297,10 @@ impl ProfileStore {
         let id = uuid::Uuid::new_v4().to_string();
         let ts = now();
         let tags = serde_json::to_string(&input.tags).map_err(|e| Error::Invalid(e.to_string()))?;
+        let rdp = rdp_json(input.rdp)?;
         self.db.with(|c| {
             c.execute(
-                &format!("INSERT INTO profiles ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)"),
+                &format!("INSERT INTO profiles ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, ?14)"),
                 params![
                     id,
                     input.name,
@@ -261,6 +315,7 @@ impl ProfileStore {
                     input.notes,
                     input.favorite,
                     ts,
+                    rdp,
                 ],
             )
         })?;
@@ -270,11 +325,12 @@ impl ProfileStore {
     pub fn update(&self, id: &str, input: ProfileInput) -> Result<Profile> {
         let input = input.normalized()?;
         let tags = serde_json::to_string(&input.tags).map_err(|e| Error::Invalid(e.to_string()))?;
+        let rdp = rdp_json(input.rdp)?;
         let changed = self.db.with(|c| {
             c.execute(
                 "UPDATE profiles SET name = ?2, protocol = ?3, host = ?4, port = ?5, username = ?6, \
                  auth_method = ?7, key_path = ?8, group_name = ?9, tags = ?10, notes = ?11, \
-                 favorite = ?12, updated_at = ?13 WHERE id = ?1",
+                 favorite = ?12, updated_at = ?13, rdp_settings = ?14 WHERE id = ?1",
                 params![
                     id,
                     input.name,
@@ -289,6 +345,7 @@ impl ProfileStore {
                     input.notes,
                     input.favorite,
                     now(),
+                    rdp,
                 ],
             )
         })?;
@@ -307,6 +364,13 @@ impl ProfileStore {
         }
         Ok(())
     }
+}
+
+fn rdp_json(settings: Option<RdpSettings>) -> Result<Option<String>> {
+    settings
+        .map(|s| serde_json::to_string(&s))
+        .transpose()
+        .map_err(|e| Error::Invalid(e.to_string()))
 }
 
 fn from_row(row: &Row<'_>) -> rusqlite::Result<Profile> {
@@ -335,6 +399,9 @@ fn from_row(row: &Row<'_>) -> rusqlite::Result<Profile> {
         favorite: row.get(11)?,
         created_at: row.get(12)?,
         updated_at: row.get(13)?,
+        rdp: row
+            .get::<_, Option<String>>(14)?
+            .and_then(|json| serde_json::from_str(&json).ok()),
     })
 }
 
@@ -359,6 +426,7 @@ mod tests {
             tags: vec!["web".into()],
             notes: String::new(),
             favorite: false,
+            rdp: None,
         }
     }
 
@@ -454,6 +522,65 @@ mod tests {
             i.host = host.into();
             assert!(i.normalized().is_ok(), "{host}");
         }
+    }
+
+    #[test]
+    fn rdp_settings_are_stored_for_rdp_profiles_only() {
+        let s = store();
+        let settings = RdpSettings {
+            width: Some(1920),
+            height: Some(1080),
+            scale: Some(125),
+            hidpi: false,
+        };
+        let mut i = input("win");
+        i.protocol = Protocol::Rdp;
+        i.port = 3389;
+        i.rdp = Some(settings);
+        let p = s.create(i.clone()).unwrap();
+        assert_eq!(s.get(&p.id).unwrap().rdp, Some(settings));
+
+        // 다른 프로토콜로 바꾸면 RDP 설정은 버림
+        i.protocol = Protocol::Ssh;
+        assert_eq!(s.update(&p.id, i).unwrap().rdp, None);
+    }
+
+    #[test]
+    fn rejects_invalid_rdp_settings() {
+        let bad = [
+            RdpSettings {
+                width: Some(1921),
+                height: Some(1080),
+                ..Default::default()
+            },
+            RdpSettings {
+                width: Some(100),
+                height: Some(100),
+                ..Default::default()
+            },
+            RdpSettings {
+                width: Some(1920),
+                height: None,
+                ..Default::default()
+            },
+            RdpSettings {
+                width: None,
+                height: None,
+                scale: Some(50),
+                hidpi: false,
+            },
+        ];
+        for settings in bad {
+            let mut i = input("win");
+            i.protocol = Protocol::Rdp;
+            i.rdp = Some(settings);
+            assert!(i.normalized().is_err(), "{settings:?}");
+        }
+        let mut i = input("win");
+        i.protocol = Protocol::Rdp;
+        i.auth_method = AuthMethod::Key;
+        i.key_path = Some("~/.ssh/id".into());
+        assert!(i.normalized().is_err(), "RDP key auth");
     }
 
     #[test]

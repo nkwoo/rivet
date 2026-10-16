@@ -52,4 +52,6 @@ allow-wildcard-paths = true
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+# IronRDP: 릴리스된 connector가 russh와 의존성 충돌 → 수정 커밋을 rev로 고정 (Cargo.toml 참고).
+# 다음 crates.io 릴리스로 옮기면 이 항목을 지웁니다.
+allow-git = ["https://github.com/Devolutions/IronRDP"]

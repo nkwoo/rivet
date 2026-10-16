@@ -15,6 +15,11 @@
     "allow-cert-pins-list",
     "allow-cert-pins-remove",
     "allow-ftp-connect",
+    "allow-rdp-connect",
+    "allow-rdp-input",
+    "allow-rdp-resize",
+    "allow-rdp-frame-ack",
+    "allow-rdp-clipboard",
     "allow-ssh-connect",
     "allow-ssh-write",
     "allow-ssh-resize",
@@ -36,6 +41,7 @@
     "allow-transfer-clear-finished",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
-    "core:window:allow-close"
+    "core:window:allow-close",
+    "core:window:allow-set-fullscreen"
   ]
 }

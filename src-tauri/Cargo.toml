@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Open-source SSH, SFTP/FTP and RDP client for macOS and Windows"
 license = "MIT OR Apache-2.0"
 edition = "2021"
-rust-version = "1.90"
+rust-version = "1.94"
 publish = false
 
 [lib]
@@ -44,8 +44,18 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 secrecy = "0.10.3"
 zeroize = "1.9.1"
 uuid = { version = "1.28.0", features = ["v4", "serde"] }
+# RDP. 릴리스된 ironrdp-connector 0.10.0은 curve25519-dalek =5.0.0-rc.1을 고정해 russh(^5)와 충돌하므로
+# 이를 고친 main 커밋(#2080, sspi 0.23 / picky rc.26)을 고정합니다. 다음 crates.io 릴리스가 나오면 버전으로 되돌립니다.
+ironrdp = { git = "https://github.com/Devolutions/IronRDP", rev = "62246b364a0282bab85087f658a81fe4207b6b31", features = ["connector", "session", "graphics", "input", "cliprdr", "dvc", "displaycontrol", "svc"] }
+ironrdp-tokio = { git = "https://github.com/Devolutions/IronRDP", rev = "62246b364a0282bab85087f658a81fe4207b6b31" }
+# RDP 서버 인증서에서 CredSSP에 쓸 공개 키를 꺼냅니다.
+x509-cert = "0.2"
+# RDP 텍스트 클립보드 공유 (웹뷰 대신 백엔드에서 OS 클립보드 접근)
+arboard = { version = "3.7.0", default-features = false }
 
 [dev-dependencies]
+# RDP 통합 테스트용 프로세스 내 서버
+ironrdp-server = { git = "https://github.com/Devolutions/IronRDP", rev = "62246b364a0282bab85087f658a81fe4207b6b31", default-features = false }
 tempfile = "3.27.0"
 # 통합 테스트에서 russh(log 크레이트) 로그까지 수집해 비밀 값 노출 여부를 검사
 tracing-log = "0.2.0"
