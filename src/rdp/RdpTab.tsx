@@ -55,7 +55,10 @@ const RESIZE_DELAY = 400;
 
 type ViewMode = "fit" | "actual";
 
-/** 원격 화면 크기 요청: 고정 해상도 또는 탭 크기 (Retina 접속이면 실제 픽셀 수) */
+/**
+ * 원격 화면 크기 요청: 고정 해상도 또는 탭 크기 (Retina 접속이면 실제 픽셀 수).
+ * 탭보다 커지면 스크롤 막대가 생겨 크기가 다시 바뀌므로 짝수로 내림합니다.
+ */
 function desiredSize(profile: Profile, stage: HTMLElement | null) {
   const s = profile.rdp;
   const dpr = s?.hidpi ? window.devicePixelRatio || 1 : 1;
@@ -63,7 +66,7 @@ function desiredSize(profile: Profile, stage: HTMLElement | null) {
   if (s?.width && s.height) return { width: s.width, height: s.height, scale };
   const w = stage && stage.clientWidth > 0 ? stage.clientWidth : FALLBACK.width;
   const h = stage && stage.clientHeight > 0 ? stage.clientHeight : FALLBACK.height;
-  return { width: Math.round((w * dpr) / 2) * 2, height: Math.round(h * dpr), scale };
+  return { width: Math.floor((w * dpr) / 2) * 2, height: Math.floor(h * dpr), scale };
 }
 
 /**
@@ -71,6 +74,8 @@ function desiredSize(profile: Profile, stage: HTMLElement | null) {
  * 키보드/마우스는 묶어서 순서대로 보냅니다. 키보드는 숨은 입력란이 받아 IME(한글 등) 조합을 지원합니다.
  */
 export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersive }: RdpTabProps) {
+  /** 탭 전체 영역. 스크롤 막대의 영향을 받지 않아 원격 해상도 계산에 씀 (스크롤되는 화면 영역을 재면 크기가 계속 바뀜) */
+  const root = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const ime = useRef<HTMLTextAreaElement>(null);
@@ -227,7 +232,7 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
         }
       };
 
-      const size = desiredSize(profile, stage.current);
+      const size = desiredSize(profile, root.current);
       try {
         const id = await api.rdpConnect({ profileId: profile.id, ...size, secret, saveSecret, events, frames });
         if (!current()) {
@@ -272,7 +277,7 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
 
   // 탭 크기 추적 + 창에 맞춤 해상도면 원격 해상도도 따라 바꿈
   useEffect(() => {
-    const el = stage.current;
+    const el = root.current;
     if (!el || !active) return;
     let timer: number | undefined;
     const measure = () => {
@@ -367,7 +372,6 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (fullscreen) setToolbarHidden(e.clientY > 48);
     const p = toRemote(e);
     if (p) send({ t: "m", ...p });
   };
@@ -506,8 +510,13 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
   const ended = !connected && status.kind !== "connecting";
 
   return (
-    <div className="rdp-tab" hidden={!active}>
-      <div ref={stage} className={`rdp-stage ${viewMode === "actual" ? "is-scroll" : ""}`}>
+    <div ref={root} className="rdp-tab" hidden={!active}>
+      <div
+        ref={stage}
+        className={`rdp-stage ${viewMode === "actual" ? "is-scroll" : ""}`}
+        // 전체 화면에서 숨은 툴바는 포인터를 위쪽 가장자리로 옮기면 다시 보임 (캔버스 밖 여백 포함)
+        onPointerMove={(e) => fullscreen && setToolbarHidden(e.clientY - e.currentTarget.getBoundingClientRect().top > 48)}
+      >
         <canvas
           ref={canvas}
           className="rdp-canvas"

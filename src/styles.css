@@ -1477,8 +1477,9 @@ textarea {
 
 /* ---------- RDP ---------- */
 
+/* 상단/상태 표시줄이 display:none이면 격자 칸에서 빠지므로, 남은 작업 영역이 한 줄 전체를 차지하게 함 */
 .app.is-immersive {
-  grid-template-rows: 0 1fr 0;
+  grid-template-rows: 1fr;
 }
 
 .app.is-immersive .topbar,
