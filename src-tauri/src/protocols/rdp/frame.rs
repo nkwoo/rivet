@@ -123,7 +123,7 @@ fn contains(outer: Rect, inner: Rect) -> bool {
         && u32::from(outer.y) + u32::from(outer.h) >= u32::from(inner.y) + u32::from(inner.h)
 }
 
-/// RGBA 프레임 버퍼의 지정한 영역을 화면 메시지로 만듭니다. 알파는 항상 불투명으로 씁니다.
+/// RGBA 프레임 버퍼의 지정한 영역을 화면 메시지로 만듭니다.
 ///
 /// `rects`는 [`Rect::clipped`]로 화면 안에 있어야 합니다.
 pub fn encode_frame(data: &[u8], width: u16, height: u16, rects: &[Rect]) -> Vec<u8> {
@@ -146,13 +146,9 @@ pub fn encode_frame(data: &[u8], width: u16, height: u16, rects: &[Rect]) -> Vec
         for y in usize::from(r.y)..usize::from(r.y) + usize::from(r.h) {
             let start = y * stride + usize::from(r.x) * 4;
             match data.get(start..start + row) {
-                Some(line) => {
-                    let begin = out.len();
-                    out.extend_from_slice(line);
-                    for alpha in out[begin + 3..].iter_mut().step_by(4) {
-                        *alpha = 0xFF;
-                    }
-                }
+                // IronRDP 디코더는 그리는 픽셀의 알파를 항상 0xFF로 씁니다. 한 번도 그려지지 않은 영역만
+                // 초기값 0(검은색)이라 그대로 보내도 화면은 같으므로 줄 단위로 복사만 합니다.
+                Some(line) => out.extend_from_slice(line),
                 // 버퍼보다 큰 사각형은 들어오지 않지만, 들어와도 패닉 대신 검은색으로 채웁니다.
                 None => out.extend((0..row).map(|i| if i % 4 == 3 { 0xFF } else { 0 })),
             }
@@ -244,10 +240,10 @@ mod tests {
     }
 
     #[test]
-    fn encodes_rect_pixels_with_opaque_alpha() {
-        // 4x2 화면, 픽셀 값 = 인덱스, 알파 0
+    fn encodes_rect_pixels() {
+        // 4x2 화면, 픽셀 값 = 인덱스
         let data: Vec<u8> = (0..4 * 2)
-            .flat_map(|i| [i as u8, i as u8, i as u8, 0])
+            .flat_map(|i| [i as u8, i as u8, i as u8, 255])
             .collect();
         let msg = encode_frame(&data, 4, 2, &[rect(1, 0, 2, 2)]);
         assert_eq!(&msg[..8], &[KIND_FRAME, 0, 4, 0, 2, 0, 1, 0]);

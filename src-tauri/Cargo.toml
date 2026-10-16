@@ -67,6 +67,15 @@ unsafe_code = "forbid"
 unwrap_used = "deny"
 expect_used = "deny"
 
+# 개발 빌드(`npm run tauri dev`)에서도 최적화합니다. 최적화하지 않으면 1080p RDP 화면 갱신이
+# 수십 배 느려집니다 (0.3fps → 37fps, rdp_integration_1080p_throughput). 의존성은 최대로,
+# Rivet 자체는 1단계로 최적화합니다. IronRDP·rustls의 제네릭 코드가 Rivet 크레이트에서 컴파일되기 때문입니다.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 codegen-units = 1
 lto = true

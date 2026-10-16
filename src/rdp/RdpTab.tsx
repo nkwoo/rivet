@@ -89,6 +89,8 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
   /** macOS ⌘: 다른 키와 함께 누르면 Ctrl, 혼자 누르면 Windows 키 */
   const meta = useRef({ down: false, ctrlSent: false, used: false });
   const frameCount = useRef(0);
+  /** 진단 표시용 1초 누적값 */
+  const stats = useRef({ bytes: 0, drawMs: 0, drawMax: 0, inputLag: [] as number[], inputAt: 0 });
   const onStateRef = useRef(onState);
   onStateRef.current = onState;
 
@@ -100,6 +102,8 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
   const [clipboard, setClipboard] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [diagnostics, setDiagnostics] = useState(false);
+  const [diag, setDiag] = useState<string>("측정 중…");
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [toolbarHidden, setToolbarHidden] = useState(false);
 
@@ -137,6 +141,9 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
   const send = useCallback(
     (...events: RdpInputEvent[]) => {
       if (!session.current || !connectedSeen.current) return;
+      if (events.some((e) => (e.t === "k" && e.down) || (e.t === "b" && e.down) || e.t === "u")) {
+        stats.current.inputAt ||= performance.now();
+      }
       for (const e of events) {
         const last = queue.current[queue.current.length - 1];
         if (e.t === "m" && last?.t === "m") queue.current[queue.current.length - 1] = e;
@@ -222,8 +229,20 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
       frames.onmessage = (data) => {
         const c = canvas.current;
         if (!current() || !c) return;
-        const msg = applyMessage(toBytes(data), c);
+        const bytes = toBytes(data);
+        const t0 = performance.now();
+        const msg = applyMessage(bytes, c);
         if (msg.kind === "frame") {
+          const st = stats.current;
+          const drawMs = performance.now() - t0;
+          st.bytes += bytes.byteLength;
+          st.drawMs += drawMs;
+          st.drawMax = Math.max(st.drawMax, drawMs);
+          // 키/클릭 뒤 첫 화면 갱신까지 (네트워크·서버 처리 포함)
+          if (st.inputAt) {
+            st.inputLag.push(t0 - st.inputAt);
+            st.inputAt = 0;
+          }
           frameCount.current++;
           setDesktop((d) => (d?.width === msg.width && d.height === msg.height ? d : { width: msg.width, height: msg.height }));
           if (session.current) void api.rdpFrameAck(session.current).catch(() => {});
@@ -329,6 +348,15 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
       const s = statusRef.current;
       const c = canvas.current;
       if (s.kind === "connected" && c) report({ ...s, detail: `${c.width}×${c.height} · ${fps} fps` });
+
+      const st = stats.current;
+      const lag = [...st.inputLag].sort((a, b) => a - b);
+      const lagText = lag.length ? `${Math.round(lag[Math.floor(lag.length / 2)] ?? 0)} ms` : "–";
+      setDiag(
+        `${fps} fps · 그리기 평균 ${fps ? (st.drawMs / fps).toFixed(1) : "0.0"} ms (최대 ${st.drawMax.toFixed(1)}) · ` +
+          `수신 ${(st.bytes / 1024 / 1024).toFixed(1)} MiB/s · 입력→화면 ${lagText}`,
+      );
+      stats.current = { bytes: 0, drawMs: 0, drawMax: 0, inputLag: [], inputAt: st.inputAt };
     }, 1000);
     return () => window.clearInterval(timer);
   }, [active, connected, report]);
@@ -569,6 +597,8 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
           aria-label="원격 데스크톱 제어"
           className={`rdp-toolbar ${toolbarHidden ? "is-hidden" : ""}`}
           onPointerEnter={() => setToolbarHidden(false)}
+          // 툴바를 눌러도 키보드 포커스는 원격 입력란에 남김 (누른 뒤 바로 원격에 타이핑)
+          onPointerDown={(e) => e.preventDefault()}
         >
           <span className="rdp-toolbar-name mono">{profile.name}</span>
           <button
@@ -601,10 +631,24 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
           <button type="button" className="rdp-tool mono" onClick={ctrlAltDel}>
             Ctrl+Alt+Del
           </button>
+          <button
+            type="button"
+            className={`rdp-tool ${diagnostics ? "is-on" : ""}`}
+            aria-pressed={diagnostics}
+            title="화면 전송 성능 진단"
+            onClick={() => setDiagnostics((d) => !d)}
+          >
+            진단
+          </button>
           <span className="rdp-toolbar-sep" />
           <button type="button" className="rdp-tool rdp-tool-danger" onClick={disconnect}>
             연결 끊기
           </button>
+          {diagnostics && (
+            <div role="status" className="rdp-diag mono">
+              {diag}
+            </div>
+          )}
         </div>
       )}
 

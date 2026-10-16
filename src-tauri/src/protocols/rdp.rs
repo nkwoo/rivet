@@ -4,9 +4,9 @@
 //! TLS는 FTPS와 같은 검증기([`super::tls`])를 써서 OS 신뢰 저장소로 확인하고, 실패하면 사용자가
 //! 고정한 지문과 비교합니다. 검증을 끄는 경로는 없습니다. 보안 없는 표준 RDP 보안(RC4)은 협상하지 않습니다.
 //!
-//! 세션이 시작되면 서버가 보낸 그래픽을 프레임 버퍼에 그리고, 바뀐 영역만 모아 일정 간격으로
-//! 웹뷰에 보냅니다([`frame`]). 웹뷰가 그리기를 마치면 확인(ack)을 보내며, 확인되지 않은 메시지가
-//! 쌓이면 변경 영역만 모아 두었다가 다음에 한 번에 보냅니다.
+//! 세션이 시작되면 서버가 보낸 그래픽을 프레임 버퍼에 그리고, 바뀐 영역을 곧바로 웹뷰에 보냅니다
+//! ([`frame`]). 웹뷰가 그리기를 마치면 확인(ack)을 보내며, 확인되지 않은 메시지가 쌓이면 변경 영역만
+//! 모아 두었다가 확인이 오면 한 번에 보냅니다.
 
 pub mod clipboard;
 pub mod frame;
@@ -48,8 +48,8 @@ use super::tls::{cert_fingerprint, client_config, CertTrust, Observed};
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 /// TLS·NLA·활성화까지 전체 접속 대기 시간
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
-/// 화면 메시지를 모아 보내는 간격 (최대 약 60fps)
-const FRAME_INTERVAL: Duration = Duration::from_millis(16);
+/// 확인(ack)이 유실됐는지 점검하는 간격. 평소에는 갱신을 받는 즉시 보냅니다.
+const FRAME_INTERVAL: Duration = Duration::from_millis(100);
 /// 웹뷰가 아직 그리지 않은 화면 메시지 수 상한
 const MAX_FRAMES_IN_FLIGHT: u32 = 2;
 /// 이 시간 동안 확인이 없으면 유실로 보고 다시 보냅니다.
@@ -667,6 +667,8 @@ impl RdpConnection {
                     _ => {}
                 }
             }
+            // 웹뷰가 밀려 있지 않으면 바로 보냅니다. 밀려 있으면 확인(ack)이 올 때까지 변경 영역을 모읍니다.
+            state.flush(&image, out);
         }
     }
 }

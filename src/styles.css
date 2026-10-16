@@ -1657,3 +1657,10 @@ textarea {
 .rdp-toast svg {
   color: var(--ok);
 }
+
+.rdp-diag {
+  flex-basis: 100%;
+  padding: 4px 10px 2px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}

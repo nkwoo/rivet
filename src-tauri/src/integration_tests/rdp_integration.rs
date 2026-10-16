@@ -449,7 +449,7 @@ impl Session {
     }
 
     /// 지정한 크기의 화면 메시지가 올 때까지 기다리며 매번 확인(ack)을 보냅니다.
-    /// 서버 비트맵이 오기 전에 보내는 빈(검은) 화면은 건너뜁니다.
+    /// 서버 비트맵이 오기 전에 보내는 빈(아직 그려지지 않은, 검은) 화면은 건너뜁니다.
     async fn frame_of_size(&mut self, width: u16, height: u16) -> [u8; 4] {
         tokio::time::timeout(WAIT, async {
             loop {
@@ -459,7 +459,7 @@ impl Session {
                 }
                 self.send(RdpCommand::FrameAck).await;
                 let (w, h, pixel) = parse_frame(&msg);
-                if (w, h) == (width, height) && pixel != [0, 0, 0, 255] {
+                if (w, h) == (width, height) && pixel[..3] != [0, 0, 0] {
                     return pixel;
                 }
             }
@@ -805,4 +805,61 @@ async fn rdp_integration_1080p_throughput() {
         bytes as f64 / secs / 1024.0 / 1024.0
     );
     assert!(frames > 0);
+}
+
+/// 작은 화면 변경(타이핑 한 글자 정도)이 웹뷰 쪽에 도착하기까지의 지연 측정 (성능 확인용).
+///
+/// 실행: `cargo test [--release] rdp_integration_small_update_latency -- --ignored --nocapture`
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "performance measurement"]
+async fn rdp_integration_small_update_latency() {
+    let _serial = SERIAL.lock().await;
+    let (w, h) = (1920u16, 1080u16);
+    let server = TestServer::start_sized(Security::Nla, "rdp", w, h).await;
+    let harness = Harness::new();
+    let mut s = harness.connect_sized(&profile(server.addr.port()), Some(PASSWORD), false, w, h);
+    s.connected_accepting_certs().await;
+    s.frame_of_size(w, h).await;
+    let updates = server.updates.lock().unwrap().clone().unwrap();
+
+    let mut samples = Vec::new();
+    for i in 0..40u16 {
+        let color = [(i * 6) as u8, 200, 40, 255];
+        let start = std::time::Instant::now();
+        updates
+            .send(DisplayUpdate::Bitmap(BitmapUpdate {
+                x: 100 + i * 40,
+                y: 500,
+                width: NonZeroU16::new(32).unwrap(),
+                height: NonZeroU16::new(32).unwrap(),
+                format: PixelFormat::BgrA32,
+                data: color
+                    .iter()
+                    .copied()
+                    .cycle()
+                    .take(32 * 32 * 4)
+                    .collect::<Vec<u8>>()
+                    .into(),
+                stride: NonZeroUsize::new(32 * 4).unwrap(),
+            }))
+            .unwrap();
+        loop {
+            let msg = tokio::time::timeout(WAIT, s.frames.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            if msg[0] == KIND_FRAME {
+                s.send(RdpCommand::FrameAck).await;
+                break;
+            }
+        }
+        samples.push(start.elapsed().as_secs_f64() * 1000.0);
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    }
+    samples.sort_by(f64::total_cmp);
+    println!(
+        "small update latency: median {:.1} ms, p90 {:.1} ms (server encode + client decode)",
+        samples[samples.len() / 2],
+        samples[samples.len() * 9 / 10]
+    );
 }
