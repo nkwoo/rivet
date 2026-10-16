@@ -296,6 +296,18 @@ impl SshConnection {
         &self.info
     }
 
+    /// 서버가 연결을 끊었거나 keepalive가 실패했는지
+    pub fn is_closed(&self) -> bool {
+        self.handle.is_closed()
+    }
+
+    /// 같은 연결 위에 SFTP 서브시스템 채널을 엽니다.
+    pub async fn open_sftp_channel(&self) -> Result<Channel<Msg>, SshError> {
+        let channel = self.handle.channel_open_session().await?;
+        channel.request_subsystem(true, "sftp").await?;
+        Ok(channel)
+    }
+
     /// PTY를 요청하고 로그인 셸을 엽니다.
     pub async fn open_shell(&self, cols: u32, rows: u32) -> Result<Channel<Msg>, SshError> {
         let channel = self.handle.channel_open_session().await?;

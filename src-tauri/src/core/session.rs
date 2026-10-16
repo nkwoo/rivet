@@ -3,6 +3,9 @@
 //! 세션마다 백그라운드 태스크 하나가 연결 → 호스트 키 확인 → 인증 → 셸 구동을 맡고,
 //! UI 이벤트와 터미널 출력은 [`SessionSink`]로 내보냅니다. 탭이 닫히면 태스크를 중단해
 //! 연결과 대기 데이터를 정리합니다.
+//!
+//! 인증된 연결은 슬롯에 보관해 파일 탐색기가 같은 연결 위에 SFTP 채널을 열 수 있게 합니다.
+//! SFTP 프로필은 셸 없이 연결만 유지합니다.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -13,18 +16,19 @@ use async_trait::async_trait;
 use russh::keys::PublicKey;
 use secrecy::SecretString;
 use serde::Serialize;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, OnceCell};
 use tokio::task::AbortHandle;
 
 use crate::core::known_hosts::{fingerprint, HostKeyStatus, KnownHostsStore};
 use crate::core::profile::{AuthMethod, Profile, Protocol};
 use crate::core::secrets::SecretStore;
 use crate::error::{Error, Result};
+use crate::protocols::sftp::SftpFs;
 use crate::protocols::ssh::{
     load_private_key, ConnectionInfo, HostKeyVerdict, HostKeyVerifier, ShellCommand, SshAuth,
     SshConnection, SshTarget,
 };
-use crate::protocols::RemoteSession;
+use crate::protocols::{RemoteFs, RemoteSession};
 
 /// 처음 보는 호스트 키에 대한 사용자 응답 대기 시간
 const HOST_KEY_PROMPT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -32,6 +36,8 @@ const HOST_KEY_PROMPT_TIMEOUT: Duration = Duration::from_secs(120);
 const COMMAND_QUEUE: usize = 256;
 /// 터미널 크기 상한
 pub const MAX_TERMINAL_DIM: u32 = 1000;
+/// 셸 없는(SFTP 전용) 세션에서 연결 끊김을 확인하는 간격
+const LIVENESS_INTERVAL: Duration = Duration::from_secs(5);
 
 pub type SessionId = String;
 
@@ -81,8 +87,8 @@ pub trait SessionSink: Send + Sync + 'static {
 pub struct SshSessionRequest {
     pub target: SshTarget,
     pub auth: SshAuth,
-    pub cols: u32,
-    pub rows: u32,
+    /// 셸을 열 때의 터미널 크기. `None`이면 셸 없이 연결만 유지합니다(SFTP 프로필).
+    pub pty: Option<(u32, u32)>,
     /// 인증에 성공하면 한 번 호출됩니다. (새로 입력받은 비밀 값을 keyring에 저장)
     pub on_authenticated: Option<Box<dyn FnOnce() + Send>>,
 }
@@ -99,10 +105,11 @@ pub fn prepare_ssh_request(
     cols: u32,
     rows: u32,
 ) -> Result<SshSessionRequest> {
-    if profile.protocol != Protocol::Ssh {
-        return Err(Error::Invalid("profile is not an SSH profile".into()));
-    }
-    let (cols, rows) = check_terminal_size(cols, rows)?;
+    let pty = match profile.protocol {
+        Protocol::Ssh => Some(check_terminal_size(cols, rows)?),
+        Protocol::Sftp => None,
+        _ => return Err(Error::Invalid("profile is not an SSH/SFTP profile".into())),
+    };
 
     let from_user = provided_secret.is_some();
     let secret = match provided_secret {
@@ -145,8 +152,7 @@ pub fn prepare_ssh_request(
             username: profile.username.clone(),
         },
         auth,
-        cols,
-        rows,
+        pty,
         on_authenticated,
     })
 }
@@ -172,6 +178,32 @@ struct Slot {
     commands: mpsc::Sender<ShellCommand>,
     host_key_reply: Option<oneshot::Sender<bool>>,
     task: Option<AbortHandle>,
+    /// 인증이 끝난 뒤 채워짐
+    conn: Option<Arc<SshConnection>>,
+    /// 처음 요청할 때 한 번만 여는 SFTP
+    fs: Arc<OnceCell<Arc<dyn RemoteFs>>>,
+}
+
+impl Slot {
+    fn new(commands: mpsc::Sender<ShellCommand>) -> Self {
+        Self {
+            commands,
+            host_key_reply: None,
+            task: None,
+            conn: None,
+            fs: Arc::new(OnceCell::new()),
+        }
+    }
+
+    /// 태스크를 중단하고 연결을 정상 종료합니다. (tokio 런타임 밖이면 drop으로 정리)
+    fn shutdown(self) {
+        if let Some(task) = self.task {
+            task.abort();
+        }
+        if let (Some(conn), Ok(rt)) = (self.conn, tokio::runtime::Handle::try_current()) {
+            rt.spawn(async move { conn.disconnect().await });
+        }
+    }
 }
 
 #[derive(Default)]
@@ -197,14 +229,7 @@ impl SessionManager {
     ) -> SessionId {
         let id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = mpsc::channel(COMMAND_QUEUE);
-        self.slots().insert(
-            id.clone(),
-            Slot {
-                commands: tx,
-                host_key_reply: None,
-                task: None,
-            },
-        );
+        self.slots().insert(id.clone(), Slot::new(tx));
 
         let verifier = Arc::new(InteractiveVerifier {
             store: known_hosts,
@@ -215,7 +240,14 @@ impl SessionManager {
         let manager = Arc::downgrade(self);
         let session_id = id.clone();
         let task = tokio::spawn(async move {
-            run_ssh_session(request, verifier, rx, sink).await;
+            let store = {
+                let (manager, session_id) = (manager.clone(), session_id.clone());
+                move |conn: Arc<SshConnection>| match manager.upgrade() {
+                    Some(m) => m.set_connection(&session_id, conn),
+                    None => false,
+                }
+            };
+            run_ssh_session(request, verifier, rx, sink, store).await;
             if let Some(m) = manager.upgrade() {
                 m.slots().remove(&session_id);
             }
@@ -249,20 +281,51 @@ impl SessionManager {
         Ok(())
     }
 
+    /// 세션의 SSH 연결 위에 SFTP를 엽니다. 이미 열려 있으면 그것을 돌려줍니다.
+    pub async fn remote_fs(&self, id: &str) -> Result<Arc<dyn RemoteFs>> {
+        let (conn, cell) = {
+            let slots = self.slots();
+            let slot = slots
+                .get(id)
+                .ok_or_else(|| Error::NotFound(format!("session {id}")))?;
+            let conn = slot
+                .conn
+                .clone()
+                .ok_or_else(|| Error::Invalid("session is not connected yet".into()))?;
+            (conn, slot.fs.clone())
+        };
+        let fs = cell
+            .get_or_try_init(|| async {
+                let fs = SftpFs::open(&conn).await?;
+                tracing::info!("sftp opened");
+                Ok::<_, Error>(Arc::new(fs) as Arc<dyn RemoteFs>)
+            })
+            .await?;
+        Ok(fs.clone())
+    }
+
     /// 세션을 즉시 종료합니다. 대기 중인 호스트 키 승인은 거부로 처리됩니다.
     pub fn close(&self, id: &str) {
-        if let Some(slot) = self.slots().remove(id) {
-            if let Some(task) = slot.task {
-                task.abort();
-            }
+        let slot = self.slots().remove(id);
+        if let Some(slot) = slot {
+            slot.shutdown();
         }
     }
 
     pub fn close_all(&self) {
-        for (_, slot) in self.slots().drain() {
-            if let Some(task) = slot.task {
-                task.abort();
+        let slots: Vec<Slot> = self.slots().drain().map(|(_, s)| s).collect();
+        for slot in slots {
+            slot.shutdown();
+        }
+    }
+
+    fn set_connection(&self, id: &str, conn: Arc<SshConnection>) -> bool {
+        match self.slots().get_mut(id) {
+            Some(slot) => {
+                slot.conn = Some(conn);
+                true
             }
+            None => false,
         }
     }
 
@@ -287,12 +350,12 @@ async fn run_ssh_session(
     verifier: Arc<InteractiveVerifier>,
     mut commands: mpsc::Receiver<ShellCommand>,
     sink: Arc<dyn SessionSink>,
+    store_connection: impl FnOnce(Arc<SshConnection>) -> bool,
 ) {
     let SshSessionRequest {
         target,
         auth,
-        cols,
-        rows,
+        pty,
         on_authenticated,
     } = request;
 
@@ -300,22 +363,34 @@ async fn run_ssh_session(
         let conn = SshConnection::connect(&target, &auth, verifier).await;
         // 인증이 끝나면 비밀 값을 메모리에서 바로 지웁니다.
         drop(auth);
-        let conn = conn?;
+        let conn = Arc::new(conn?);
         tracing::info!(host = %target.host, port = target.port, "ssh authenticated");
         if let Some(callback) = on_authenticated {
             callback();
+        }
+        if !store_connection(conn.clone()) {
+            // 인증 도중 탭이 닫힘
+            conn.disconnect().await;
+            return Ok(None);
         }
         sink.event(SessionEvent::Connected {
             info: conn.info().clone(),
         });
 
-        let channel = conn.open_shell(cols, rows).await?;
-        let output_sink = sink.clone();
-        let status =
-            SshConnection::run_shell(channel, &mut commands, move |data| output_sink.output(data))
-                .await;
+        let status = match pty {
+            Some((cols, rows)) => {
+                let channel = conn.open_shell(cols, rows).await?;
+                let output_sink = sink.clone();
+                SshConnection::run_shell(channel, &mut commands, move |data| {
+                    output_sink.output(data)
+                })
+                .await
+                .map_err(Error::from)
+            }
+            None => hold_connection(&conn, &mut commands).await,
+        };
         conn.disconnect().await;
-        Ok::<_, Error>(status?)
+        status
     }
     .await;
 
@@ -328,6 +403,22 @@ async fn run_ssh_session(
                 message: e.to_string(),
             });
             sink.event(SessionEvent::Closed { exit_status: None });
+        }
+    }
+}
+
+/// 셸 없는 세션: 탭이 닫히거나 서버가 연결을 끊을 때까지 기다립니다.
+async fn hold_connection(
+    conn: &SshConnection,
+    commands: &mut mpsc::Receiver<ShellCommand>,
+) -> Result<Option<u32>> {
+    let mut tick = tokio::time::interval(LIVENESS_INTERVAL);
+    loop {
+        tokio::select! {
+            cmd = commands.recv() => if cmd.is_none() { return Ok(None) },
+            _ = tick.tick() => if conn.is_closed() {
+                return Err(Error::Fs(crate::protocols::FsError::ConnectionLost));
+            },
         }
     }
 }
@@ -499,7 +590,11 @@ mod tests {
         assert!(prepare_ssh_request(&p, None, false, secrets.clone(), 0, 24).is_err());
         assert!(prepare_ssh_request(&p, None, false, secrets.clone(), 80, 5000).is_err());
         p.protocol = Protocol::Rdp;
-        assert!(prepare_ssh_request(&p, None, false, secrets, 80, 24).is_err());
+        assert!(prepare_ssh_request(&p, None, false, secrets.clone(), 80, 24).is_err());
+        // SFTP 프로필은 셸이 없어 터미널 크기를 보지 않음
+        p.protocol = Protocol::Sftp;
+        let req = prepare_ssh_request(&p, None, false, secrets, 0, 0).unwrap();
+        assert!(req.pty.is_none());
     }
 
     #[test]
@@ -547,14 +642,7 @@ mod tests {
             sink: sink.clone(),
         };
         let (tx, _rx) = mpsc::channel(1);
-        manager.slots().insert(
-            "s1".into(),
-            Slot {
-                commands: tx,
-                host_key_reply: None,
-                task: None,
-            },
-        );
+        manager.slots().insert("s1".into(), Slot::new(tx));
         let key = PublicKey::from_openssh(
             "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILivYAx9W//3gPpBQ8sYmjiLyHYjP1Ow9bzH+Vs7rGm6",
         )

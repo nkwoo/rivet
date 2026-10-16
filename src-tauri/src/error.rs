@@ -1,4 +1,5 @@
 use crate::protocols::ssh::SshError;
+use crate::protocols::FsError;
 
 /// 백엔드 공통 에러 타입.
 ///
@@ -31,6 +32,9 @@ pub enum Error {
 
     #[error(transparent)]
     Ssh(#[from] SshError),
+
+    #[error(transparent)]
+    Fs(#[from] FsError),
 }
 
 impl Error {
@@ -43,6 +47,7 @@ impl Error {
             Error::NotFound(_) => "notFound",
             Error::PasswordRequired => "passwordRequired",
             Error::Ssh(e) => e.code(),
+            Error::Fs(e) => e.code(),
         }
     }
 }

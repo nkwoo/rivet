@@ -13,6 +13,20 @@ const COMMANDS: &[&str] = &[
     "ssh_resize",
     "ssh_close",
     "ssh_host_key_respond",
+    "local_home",
+    "local_list",
+    "sftp_open",
+    "sftp_list",
+    "sftp_mkdir",
+    "sftp_rename",
+    "sftp_remove",
+    "transfer_subscribe",
+    "transfer_upload",
+    "transfer_download",
+    "transfer_resolve",
+    "transfer_cancel",
+    "transfer_retry",
+    "transfer_clear_finished",
 ];
 
 fn main() {

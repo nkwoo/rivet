@@ -17,12 +17,15 @@ use profile::ProfileStore;
 use secrets::{KeyringStore, SecretStore};
 use session::SessionManager;
 
+use crate::transfer::TransferManager;
+
 /// Tauri가 관리하는 앱 전역 상태
 pub struct AppState {
     pub profiles: ProfileStore,
     pub known_hosts: Arc<KnownHostsStore>,
     pub secrets: Arc<dyn SecretStore>,
     pub sessions: Arc<SessionManager>,
+    pub transfers: Arc<TransferManager>,
 }
 
 impl AppState {
@@ -39,6 +42,7 @@ impl AppState {
             known_hosts: Arc::new(KnownHostsStore::new(db)),
             secrets,
             sessions: SessionManager::new(),
+            transfers: TransferManager::new(),
         }
     }
 

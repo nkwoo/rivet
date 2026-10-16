@@ -35,12 +35,14 @@ cargo audit --file src-tauri/Cargo.lock                  # cargo install --locke
 npm audit
 ```
 
-### SSH 통합 테스트
+### SSH / SFTP 통합 테스트
 
 Docker로 테스트용 OpenSSH 서버를 띄우고 `#[ignore]`된 통합 테스트를 실행합니다. (Docker 필요)
 
 ```bash
-src-tauri/tests/docker/run-ssh-it.sh
+src-tauri/tests/docker/run-ssh-it.sh             # 전체 (대용량 전송은 64MB)
+src-tauri/tests/docker/run-ssh-it.sh sftp        # 이름에 sftp가 들어간 테스트만
+RIVET_IT_BIG_MB=1024 src-tauri/tests/docker/run-ssh-it.sh sftp_large   # 1GB 전송
 ```
 
 로컬 키체인을 실제로 쓰는 테스트는 `cargo test --manifest-path src-tauri/Cargo.toml -- --ignored keyring`으로 따로 실행합니다.

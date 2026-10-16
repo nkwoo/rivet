@@ -89,9 +89,12 @@ pub async fn ssh_resize(
         .await?)
 }
 
+/// 세션을 닫고 그 세션의 남은 전송을 취소합니다. (연결 종료를 위해 비동기 런타임에서 실행)
 #[tauri::command]
-pub fn ssh_close(state: State<'_, AppState>, session_id: String) {
+pub async fn ssh_close(state: State<'_, AppState>, session_id: String) -> CmdResult<()> {
+    state.transfers.cancel_session(&session_id);
     state.sessions.close(&session_id);
+    Ok(())
 }
 
 /// 처음 보는 호스트 키 승인 대화상자의 응답

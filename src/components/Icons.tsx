@@ -72,3 +72,70 @@ export const StarIcon = ({ filled }: { filled: boolean }) => (
     <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z" />
   </svg>
 );
+
+export const ArrowUpIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" {...base} strokeWidth={2.2}>
+    <path d="M12 19V5M5 12l7-7 7 7" />
+  </svg>
+);
+
+export const RefreshIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" {...base} strokeWidth={2.2}>
+    <path d="M20 11a8 8 0 1 0-2.3 5.7" />
+    <path d="M20 4v7h-7" />
+  </svg>
+);
+
+export const FolderIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" {...base}>
+    <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z" />
+  </svg>
+);
+
+export const FolderPlusIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" {...base}>
+    <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z" />
+    <path d="M12 11v6M9 14h6" />
+  </svg>
+);
+
+export const FileIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" {...base}>
+    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+    <path d="M14 3v5h5" />
+  </svg>
+);
+
+export const LinkIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" {...base}>
+    <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
+    <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
+  </svg>
+);
+
+export const DownloadIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" {...base}>
+    <path d="M12 4v12M6 10l6 6 6-6" />
+    <path d="M4 20h16" />
+  </svg>
+);
+
+export const UploadIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" {...base} strokeWidth={2.2}>
+    <path d="M12 16V4M6 10l6-6 6 6" />
+    <path d="M4 20h16" />
+  </svg>
+);
+
+export const TrashIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" {...base}>
+    <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
+  </svg>
+);
+
+export const TerminalIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" {...base}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="m7 9 3 3-3 3M13 15h4" />
+  </svg>
+);

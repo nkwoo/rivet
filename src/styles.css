@@ -400,11 +400,81 @@ textarea {
 .terminal-tab {
   position: absolute;
   inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-tab[hidden],
+.terminal-pane[hidden] {
+  display: none;
+}
+
+.session-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--line);
+}
+
+.view-switch {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--graphite);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+}
+
+.view-switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.view-switch button.is-on {
+  background: #232830;
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--signal);
+}
+
+.view-switch button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.session-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-pane {
+  position: relative;
+  flex: 1;
+  min-height: 0;
   padding: 12px 0 8px 16px;
 }
 
-.terminal-tab[hidden] {
-  display: none;
+.session-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--graphite);
 }
 
 .terminal-host {
@@ -925,4 +995,439 @@ textarea {
   border: 1px solid var(--line-strong);
   border-radius: 10px;
   box-shadow: 0 12px 32px rgb(0 0 0 / 0.4);
+}
+
+/* ---------- 파일 전송 ---------- */
+
+.files {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--graphite);
+}
+
+.files-head {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--line);
+}
+
+.files-title {
+  font-weight: 600;
+}
+
+.files-badge {
+  font-size: 11px;
+  color: var(--wire);
+  border: 1px solid #2e4a66;
+  border-radius: 5px;
+  padding: 2px 8px;
+}
+
+.files-actions {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.files-policy-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.select {
+  height: 36px;
+  padding: 0 10px;
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+}
+
+.files-notice {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #2a1e14;
+  border-bottom: 1px solid #5a3a2a;
+  color: var(--warn-text);
+  font-size: 13px;
+}
+
+.files-notice .link-button {
+  margin-left: auto;
+  color: var(--warn-text);
+}
+
+.panes {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  /* 창이 좁아도 좌우 2단을 유지하고 각 창 안에서 가로 스크롤 */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1px;
+  background: var(--line);
+}
+
+.pane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--graphite);
+  box-shadow: inset 0 0 0 2px transparent;
+  transition: box-shadow 0.1s;
+}
+
+/* 창이 좁으면 원격 경로 앞의 사용자@호스트를 숨겨 경로가 보이게 함 */
+.pane {
+  container-type: inline-size;
+}
+
+.pane.is-drop {
+  box-shadow: inset 0 0 0 2px var(--signal);
+  background: #15130f;
+}
+
+.pane-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 8px 16px;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--line);
+}
+
+.pane-side {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.pane-path {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 8px;
+  background: var(--graphite);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+
+.pane-path:focus-within {
+  border-color: var(--wire);
+}
+
+.pane-prefix {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+}
+
+.pane-path input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+}
+
+.icon-button-sm {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+.icon-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+}
+
+.pane-body:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--wire);
+}
+
+.pane-message {
+  margin: 0;
+  padding: 16px;
+  font-size: 13px;
+}
+
+.pane-error {
+  color: var(--error);
+}
+
+.file-table {
+  width: 100%;
+  min-width: 460px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.file-table th {
+  user-select: none;
+  -webkit-user-select: none;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 7px 12px;
+  background: var(--graphite);
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-faint);
+}
+
+.file-table th:first-child,
+.file-table td:first-child {
+  padding-left: 16px;
+}
+
+.file-table td {
+  padding: 6px 12px;
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.file-table td.mono {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.file-table .num {
+  text-align: right;
+}
+
+.file-table tbody tr:hover {
+  background: #171a1f;
+}
+
+.file-table tbody tr.is-selected {
+  background: #1f242b;
+  box-shadow: inset 3px 0 0 var(--signal);
+}
+
+.file-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+}
+
+.file-name svg {
+  flex: none;
+  color: #5a626e;
+}
+
+.file-dir svg {
+  color: var(--wire);
+}
+
+.file-symlink svg {
+  color: var(--text-faint);
+}
+
+.file-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-foot {
+  flex: none;
+  padding: 8px 16px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.pane-warn {
+  color: var(--warn);
+}
+
+.queue {
+  flex: none;
+  max-height: 32%;
+  display: flex;
+  flex-direction: column;
+  background: var(--chrome);
+  border-top: 1px solid var(--line-strong);
+}
+
+.queue-head {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.queue-title {
+  font-weight: 600;
+}
+
+.queue-summary {
+  font-size: 11.5px;
+}
+
+.queue-clear {
+  margin-left: auto;
+}
+
+.queue-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  overflow: auto;
+}
+
+.queue-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 2fr) minmax(0, 2fr) minmax(80px, 160px) minmax(150px, 220px);
+  align-items: center;
+  gap: 14px;
+  min-width: 720px;
+  padding: 6px 16px;
+}
+
+.queue-dir {
+  font-size: 14px;
+}
+
+.queue-dir.is-up {
+  color: var(--signal);
+}
+
+.queue-dir.is-down {
+  color: var(--wire);
+}
+
+.queue-name,
+.queue-target,
+.queue-status-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-target {
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.queue-bar {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line-strong);
+  overflow: hidden;
+}
+
+.queue-fill {
+  display: block;
+  height: 100%;
+}
+
+.queue-fill.is-up {
+  background: var(--signal);
+}
+
+.queue-fill.is-down {
+  background: var(--wire);
+}
+
+.queue-fill.is-done {
+  background: var(--ok);
+}
+
+.queue-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12.5px;
+}
+
+.tone-ok {
+  color: var(--ok);
+}
+
+.tone-warn {
+  color: var(--warn);
+}
+
+.tone-muted {
+  color: var(--text-muted);
+}
+
+.button-tiny {
+  flex: none;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.drag-ghost {
+  position: fixed;
+  z-index: 30;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--panel);
+  border: 1px solid var(--signal);
+  font-size: 12.5px;
+  pointer-events: none;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
+}
+
+/* 창이 좁을 때: 사용자@호스트를 숨기고 경로란을 버튼 아래 줄로 */
+@container (max-width: 460px) {
+  .pane-prefix {
+    display: none;
+  }
+
+  .pane-head {
+    flex-wrap: wrap;
+  }
+
+  .pane-side {
+    margin-right: auto;
+  }
+
+  .pane-path {
+    order: 1;
+    flex-basis: 100%;
+  }
 }

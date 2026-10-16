@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Docker OpenSSH 서버를 띄우고 SSH 통합 테스트(#[ignore])를 실행합니다.
-# 사용: src-tauri/tests/docker/run-ssh-it.sh
+# 사용: src-tauri/tests/docker/run-ssh-it.sh [테스트 이름 필터]
+# 1GB 전송 확인: RIVET_IT_BIG_MB=1024 src-tauri/tests/docker/run-ssh-it.sh sftp_large
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -32,5 +33,5 @@ for _ in $(seq 1 50); do
   sleep 0.2
 done
 
-RIVET_IT_SSH_PORT="$PORT" RIVET_IT_SSH_KEY="$WORK/id_ed25519" \
-  cargo test --manifest-path "$MANIFEST" --lib -- --ignored --test-threads=1 ssh_integration "$@"
+RIVET_IT_SSH_PORT="$PORT" RIVET_IT_SSH_KEY="$WORK/id_ed25519" RIVET_IT_BIG_MB="${RIVET_IT_BIG_MB:-64}" \
+  cargo test --manifest-path "$MANIFEST" --lib -- --ignored --test-threads=1 "${@:-ssh_integration}"

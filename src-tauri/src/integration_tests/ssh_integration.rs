@@ -411,3 +411,5 @@ async fn ssh_integration_password_never_appears_in_trace_logs() {
     );
     assert!(!logs.contains(PASSWORD), "password leaked into logs");
 }
+
+mod sftp;

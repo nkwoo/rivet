@@ -77,7 +77,7 @@ export default function App() {
 
   const openProfile = useCallback(
     (profile: Profile) => {
-      if (profile.protocol !== "ssh") {
+      if (profile.protocol !== "ssh" && profile.protocol !== "sftp") {
         showToast(`${profile.protocol.toUpperCase()} 연결은 아직 지원하지 않습니다.`);
         return;
       }

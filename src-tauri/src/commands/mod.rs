@@ -4,9 +4,11 @@
 //! `capabilities/default.json`에도 함께 등록해야 웹뷰에서 호출할 수 있습니다.
 
 pub mod app;
+pub mod files;
 pub mod known_hosts;
 pub mod profiles;
 pub mod ssh;
+pub mod transfer;
 
 use serde::Serialize;
 

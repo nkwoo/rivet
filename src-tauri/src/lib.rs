@@ -51,6 +51,20 @@ pub fn run() -> Result<(), Error> {
             commands::ssh::ssh_resize,
             commands::ssh::ssh_close,
             commands::ssh::ssh_host_key_respond,
+            commands::files::local_home,
+            commands::files::local_list,
+            commands::files::sftp_open,
+            commands::files::sftp_list,
+            commands::files::sftp_mkdir,
+            commands::files::sftp_rename,
+            commands::files::sftp_remove,
+            commands::transfer::transfer_subscribe,
+            commands::transfer::transfer_upload,
+            commands::transfer::transfer_download,
+            commands::transfer::transfer_resolve,
+            commands::transfer::transfer_cancel,
+            commands::transfer::transfer_retry,
+            commands::transfer::transfer_clear_finished,
         ])
         .build(tauri::generate_context!())?;
 

@@ -27,6 +27,8 @@ async-trait = "0.1.92"
 # 0.62.5 미만은 보안 권고 대상 (docs/SECURITY.md). flate2(압축) 기능은 빼서 SSH 압축을 비활성화합니다.
 # 암호 백엔드는 Windows 빌드에 cmake/NASM이 필요 없는 ring을 사용합니다.
 russh = { version = "0.64.1", default-features = false, features = ["ring", "rsa"] }
+# russh와 같은 연결 위에 SFTP 서브시스템 채널을 엽니다. 직접 등록된 보안 권고 없음 (2026-10-16 확인)
+russh-sftp = "3.0.1"
 # v1 기능: macOS 키체인 / Windows 자격 증명 관리자
 keyring = "4.2.0"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
