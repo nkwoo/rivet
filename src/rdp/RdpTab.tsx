@@ -87,7 +87,7 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
   const sending = useRef(false);
   const wheelRest = useRef({ x: 0, y: 0 });
   /** macOS ⌘: 다른 키와 함께 누르면 Ctrl, 혼자 누르면 Windows 키 */
-  const meta = useRef({ down: false, ctrlSent: false, used: false });
+  const meta = useRef({ down: false, ctrlSent: false, used: false, right: false });
   const frameCount = useRef(0);
   /** 진단 표시용 1초 누적값 */
   const stats = useRef({ bytes: 0, drawMs: 0, drawMax: 0, inputLag: [] as number[], inputAt: 0 });
@@ -103,6 +103,11 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
   const [fullscreen, setFullscreen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState(false);
+  /** 맥 입력기 모드: 조합 중인 글자와 미리보기 위치 (화면 영역 기준, 마지막 클릭 위치) */
+  const [composing, setComposing] = useState("");
+  const caret = useRef<{ x: number; y: number } | null>(null);
+  const remoteIme = profile.rdp?.keyboard === "remote";
+  const hangulKey = profile.rdp?.hangulKey ?? "rightAlt";
   const [diag, setDiag] = useState<string>("측정 중…");
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [toolbarHidden, setToolbarHidden] = useState(false);
@@ -155,7 +160,8 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
   );
 
   const releaseAll = useCallback(() => {
-    meta.current = { down: false, ctrlSent: false, used: false };
+    meta.current = { down: false, ctrlSent: false, used: false, right: false };
+    setComposing("");
     send({ t: "r" });
   }, [send]);
 
@@ -407,6 +413,8 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     ime.current?.focus();
+    const st = stage.current?.getBoundingClientRect();
+    if (st) caret.current = { x: e.clientX - st.left, y: e.clientY - st.top };
     e.currentTarget.setPointerCapture(e.pointerId);
     const p = toRemote(e);
     if (p) send({ t: "m", ...p }, { t: "b", button: e.button, down: true });
@@ -452,14 +460,31 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
 
   const key = (code: number, down: boolean) => send({ t: "k", code, down });
 
+  /** 원격 입력기의 한/영 전환 키를 보냄 (원격 입력기 모드) */
+  const toggleHangul = () => {
+    if (hangulKey === "lang1") {
+      key(SC.lang1, true);
+      key(SC.lang1, false);
+    } else if (hangulKey === "shiftSpace") {
+      key(SC.shift, true);
+      key(SC.space, true);
+      key(SC.space, false);
+      key(SC.shift, false);
+    } else {
+      key(SC.rightAlt, true);
+      key(SC.rightAlt, false);
+    }
+  };
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // IME 조합 중인 키는 입력란에 맡기고, 조합이 끝나면 글자로 보냄
-    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    // 맥 입력기 모드: 조합 중인 키는 입력란에 맡기고, 조합이 끝나면 글자로 보냄.
+    // 원격 입력기 모드: 입력란이 읽기 전용이라 맥 입력기가 끼어들지 않고 모든 키를 스캔 코드로 보냄
+    if (!remoteIme && (e.nativeEvent.isComposing || e.keyCode === 229)) return;
     const sc = scancode(e.code);
     if (sc === null) return;
     e.preventDefault();
     if (IS_MAC && (e.code === "MetaLeft" || e.code === "MetaRight")) {
-      meta.current = { down: true, ctrlSent: false, used: false };
+      meta.current = { down: true, ctrlSent: false, used: false, right: e.code === "MetaRight" };
       return;
     }
     if (IS_MAC && meta.current.down && !meta.current.ctrlSent) {
@@ -477,11 +502,14 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
     if (IS_MAC && (e.code === "MetaLeft" || e.code === "MetaRight")) {
       const m = meta.current;
       if (m.ctrlSent) key(SC.ctrl, false);
-      else if (!m.used) {
+      else if (!m.used && m.right && remoteIme) {
+        // 원격 입력기 모드에서 오른쪽 ⌘ 단독 = 원격 한/영 전환
+        toggleHangul();
+      } else if (!m.used) {
         key(SC.win, true);
         key(SC.win, false);
       }
-      meta.current = { down: false, ctrlSent: false, used: false };
+      meta.current = { down: false, ctrlSent: false, used: false, right: false };
       return;
     }
     key(sc, false);
@@ -492,14 +520,19 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
     for (let i = 0; i < clean.length; i += 200) send({ t: "u", text: clean.slice(i, i + 200) });
   };
 
+  const onCompositionUpdate = (e: React.CompositionEvent<HTMLTextAreaElement>) => {
+    if (!remoteIme) setComposing(e.data ?? "");
+  };
+
   const onCompositionEnd = (e: React.CompositionEvent<HTMLTextAreaElement>) => {
-    if (e.data) sendText(e.data);
+    setComposing("");
+    if (!remoteIme && e.data) sendText(e.data);
     e.currentTarget.value = "";
   };
 
   const onInput = (e: React.FormEvent<HTMLTextAreaElement>) => {
     const native = e.nativeEvent as InputEvent;
-    if (native.isComposing) return;
+    if (native.isComposing || remoteIme) return;
     // 조합 없이 들어온 글자 (이모지 선택기, 일부 IME의 확정 문자 등)
     if (native.inputType === "insertText" && native.data) sendText(native.data);
     e.currentTarget.value = "";
@@ -566,10 +599,28 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
           spellCheck={false}
           onKeyDown={onKeyDown}
           onKeyUp={onKeyUp}
+          readOnly={remoteIme}
+          onCompositionUpdate={onCompositionUpdate}
           onCompositionEnd={onCompositionEnd}
           onInput={onInput}
           onBlur={() => releaseAll()}
         />
+        {composing && connected && (
+          <div
+            className="rdp-preedit"
+            aria-hidden="true"
+            style={
+              caret.current
+                ? {
+                    left: Math.min(caret.current.x, stageSize.width - 80),
+                    top: Math.max(0, Math.min(caret.current.y + 14, stageSize.height - 40)),
+                  }
+                : { left: "50%", bottom: 24, transform: "translateX(-50%)" }
+            }
+          >
+            {composing}
+          </div>
+        )}
         {!(connected && desktop) && (
           <div className="session-placeholder rdp-placeholder">
             <MonitorIcon size={40} />
@@ -628,6 +679,11 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
           >
             <ClipboardIcon />
           </button>
+          {remoteIme && (
+            <button type="button" className="rdp-tool" title="원격 입력기 한/영 전환 (오른쪽 ⌘)" onClick={toggleHangul}>
+              한/영
+            </button>
+          )}
           <button type="button" className="rdp-tool mono" onClick={ctrlAltDel}>
             Ctrl+Alt+Del
           </button>

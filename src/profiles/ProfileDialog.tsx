@@ -28,7 +28,14 @@ const RESOLUTIONS: [number, number][] = [
   [2560, 1440],
 ];
 const SCALES = [100, 125, 150, 175, 200];
-const DEFAULT_RDP: RdpSettings = { width: null, height: null, scale: null, hidpi: false };
+const DEFAULT_RDP: RdpSettings = {
+  width: null,
+  height: null,
+  scale: null,
+  hidpi: false,
+  keyboard: "local",
+  hangulKey: "rightAlt",
+};
 
 interface ProfileDialogProps {
   /** 없으면 새 연결 */
@@ -91,7 +98,7 @@ export function ProfileDialog({ profile, groups, onSave, onDelete, onForgetSecre
   };
 
   const isSsh = form.protocol === "ssh" || form.protocol === "sftp";
-  const rdp = form.rdp ?? DEFAULT_RDP;
+  const rdp = { ...DEFAULT_RDP, ...form.rdp };
   const setRdp = (patch: Partial<RdpSettings>) => set("rdp", { ...rdp, ...patch });
 
   const submit = async (e: FormEvent, connect: boolean) => {
@@ -359,6 +366,34 @@ export function ProfileDialog({ profile, groups, onSave, onDelete, onForgetSecre
                 <span>고해상도(Retina) 디스플레이의 실제 픽셀로 접속 (선명하지만 전송량이 늘어납니다)</span>
               </label>
             )}
+            <label className="field span-2">
+              <span className="label">키보드 입력 방식</span>
+              <select
+                value={rdp.keyboard}
+                onChange={(e) => setRdp({ keyboard: e.target.value === "remote" ? "remote" : "local" })}
+              >
+                <option value="local">맥 입력기 (한/영은 맥에서 전환)</option>
+                <option value="remote">원격 입력기 (한/영은 원격에서 전환)</option>
+              </select>
+            </label>
+            {rdp.keyboard === "remote" && (
+              <label className="field span-2">
+                <span className="label">원격 한/영 전환 키</span>
+                <select
+                  value={rdp.hangulKey}
+                  onChange={(e) => setRdp({ hangulKey: e.target.value as RdpSettings["hangulKey"] })}
+                >
+                  <option value="rightAlt">오른쪽 Alt</option>
+                  <option value="lang1">한/영 키</option>
+                  <option value="shiftSpace">Shift+Space</option>
+                </select>
+              </label>
+            )}
+            <p className="hint span-4">
+              {rdp.keyboard === "local"
+                ? "맥 입력기가 글자를 완성한 뒤 원격에 보냅니다. 조합 중인 글자는 마지막으로 클릭한 위치에 미리 보여 줍니다."
+                : "키를 그대로 보내 Windows 입력기가 조합하므로 자음·모음이 바로 보입니다. 원격 한/영 전환은 툴바의 한/영 버튼이나 오른쪽 ⌘로 합니다. Windows 입력기 설정에 맞는 전환 키를 고르세요."}
+            </p>
           </div>
         )}
 

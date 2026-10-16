@@ -3,7 +3,12 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 export type Protocol = "ssh" | "sftp" | "ftp" | "ftps" | "rdp";
 export type AuthMethod = "password" | "key" | "agent";
 
-/** RDP 화면 설정. 해상도가 없으면 탭 크기에 맞춥니다. */
+/** RDP 키보드: 맥 입력기가 조합한 글자를 보냄(local) / 키 신호를 보내 원격 Windows 입력기가 조합(remote) */
+export type KeyboardMode = "local" | "remote";
+/** 원격 입력기 모드에서 원격 한/영 전환에 보내는 키 */
+export type HangulKey = "rightAlt" | "lang1" | "shiftSpace";
+
+/** RDP 화면·키보드 설정. 해상도가 없으면 탭 크기에 맞춥니다. */
 export interface RdpSettings {
   width: number | null;
   height: number | null;
@@ -11,6 +16,8 @@ export interface RdpSettings {
   scale: number | null;
   /** 창에 맞춤일 때 고해상도 디스플레이의 실제 픽셀 수로 접속 */
   hidpi: boolean;
+  keyboard: KeyboardMode;
+  hangulKey: HangulKey;
 }
 
 /** 저장된 연결 프로필. 비밀 값은 포함하지 않습니다. */

@@ -82,7 +82,29 @@ impl AuthMethod {
     }
 }
 
-/// RDP 화면 설정
+/// RDP 키보드 입력 방식
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum KeyboardMode {
+    /// 로컬(맥) 입력기가 조합한 글자를 유니코드로 보냄
+    #[default]
+    Local,
+    /// 물리 키를 스캔 코드로 보내 원격 Windows 입력기가 조합함
+    Remote,
+}
+
+/// 원격 입력기 모드에서 원격의 한/영 전환에 쓰는 키
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HangulKey {
+    #[default]
+    RightAlt,
+    /// 한국어 키보드의 한/영 키 (Lang1)
+    Lang1,
+    ShiftSpace,
+}
+
+/// RDP 화면·키보드 설정
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RdpSettings {
@@ -97,6 +119,10 @@ pub struct RdpSettings {
     /// 창에 맞춤일 때 Retina 등 고해상도 디스플레이의 실제 픽셀 수로 접속
     #[serde(default)]
     pub hidpi: bool,
+    #[serde(default)]
+    pub keyboard: KeyboardMode,
+    #[serde(default)]
+    pub hangul_key: HangulKey,
 }
 
 impl RdpSettings {
@@ -532,6 +558,8 @@ mod tests {
             height: Some(1080),
             scale: Some(125),
             hidpi: false,
+            keyboard: KeyboardMode::Remote,
+            hangul_key: HangulKey::Lang1,
         };
         let mut i = input("win");
         i.protocol = Protocol::Rdp;
@@ -543,6 +571,24 @@ mod tests {
         // 다른 프로토콜로 바꾸면 RDP 설정은 버림
         i.protocol = Protocol::Ssh;
         assert_eq!(s.update(&p.id, i).unwrap().rdp, None);
+    }
+
+    #[test]
+    fn rdp_settings_json_defaults_and_rejects_unknown_values() {
+        // 이전 버전이 저장한 JSON (키보드 항목 없음)
+        let old: RdpSettings =
+            serde_json::from_str(r#"{"width":null,"height":null,"scale":null,"hidpi":true}"#)
+                .unwrap();
+        assert_eq!(old.keyboard, KeyboardMode::Local);
+        assert_eq!(old.hangul_key, HangulKey::RightAlt);
+        let json = serde_json::to_value(RdpSettings {
+            keyboard: KeyboardMode::Remote,
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(json["keyboard"], "remote");
+        assert_eq!(json["hangulKey"], "rightAlt");
+        assert!(serde_json::from_str::<RdpSettings>(r#"{"keyboard":"other"}"#).is_err());
     }
 
     #[test]
@@ -564,10 +610,8 @@ mod tests {
                 ..Default::default()
             },
             RdpSettings {
-                width: None,
-                height: None,
                 scale: Some(50),
-                hidpi: false,
+                ..Default::default()
             },
         ];
         for settings in bad {

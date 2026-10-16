@@ -141,6 +141,11 @@ export function scancode(code: string): number | null {
 export const SC = {
   ctrl: 0x1d,
   alt: 0x38,
+  shift: 0x2a,
+  space: 0x39,
   del: 0xe053,
   win: 0xe05b,
+  rightAlt: 0xe038,
+  /** 한국어 키보드의 한/영 키 */
+  lang1: 0x72,
 } as const;
