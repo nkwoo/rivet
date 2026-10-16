@@ -3,5 +3,22 @@
   "identifier": "default",
   "description": "메인 창에 허용하는 최소 권한. 새 명령은 필요한 것만 추가합니다.",
   "windows": ["main"],
-  "permissions": ["allow-app-info"]
+  "permissions": [
+    "allow-app-info",
+    "allow-profile-list",
+    "allow-profile-create",
+    "allow-profile-update",
+    "allow-profile-delete",
+    "allow-profile-forget-secret",
+    "allow-known-hosts-list",
+    "allow-known-hosts-remove",
+    "allow-ssh-connect",
+    "allow-ssh-write",
+    "allow-ssh-resize",
+    "allow-ssh-close",
+    "allow-ssh-host-key-respond",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-close"
+  ]
 }

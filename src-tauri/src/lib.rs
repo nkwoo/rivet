@@ -5,8 +5,14 @@
 mod commands;
 mod core;
 mod error;
+#[cfg(test)]
+mod integration_tests;
+#[cfg(target_os = "macos")]
+mod menu;
 mod protocols;
 mod transfer;
+
+use tauri::Manager;
 
 pub use error::Error;
 
@@ -19,8 +25,41 @@ pub fn run() -> Result<(), Error> {
         )
         .init();
 
-    tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![commands::app::app_info])
-        .run(tauri::generate_context!())?;
+    let app = tauri::Builder::default()
+        .setup(|app| {
+            let data_dir = app.path().app_data_dir()?;
+            let state = core::AppState::open(&data_dir)?;
+            app.manage(state);
+            #[cfg(target_os = "macos")]
+            {
+                app.set_menu(menu::build(app.handle())?)?;
+                app.on_menu_event(|app, event| menu::handle_event(app, event.id().as_ref()));
+            }
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::app::app_info,
+            commands::profiles::profile_list,
+            commands::profiles::profile_create,
+            commands::profiles::profile_update,
+            commands::profiles::profile_delete,
+            commands::profiles::profile_forget_secret,
+            commands::known_hosts::known_hosts_list,
+            commands::known_hosts::known_hosts_remove,
+            commands::ssh::ssh_connect,
+            commands::ssh::ssh_write,
+            commands::ssh::ssh_resize,
+            commands::ssh::ssh_close,
+            commands::ssh::ssh_host_key_respond,
+        ])
+        .build(tauri::generate_context!())?;
+
+    app.run(|handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            if let Some(state) = handle.try_state::<core::AppState>() {
+                state.sessions.close_all();
+            }
+        }
+    });
     Ok(())
 }

@@ -17,6 +17,8 @@ export default defineConfig({
     watch: { ignored: ["**/src-tauri/**"] },
   },
   build: {
+    // 데스크톱 앱이라 xterm.js를 포함한 단일 번들이 커도 문제없음
+    chunkSizeWarningLimit: 1500,
     target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
     minify: !process.env.TAURI_ENV_DEBUG,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
