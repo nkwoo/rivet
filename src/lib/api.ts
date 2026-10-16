@@ -3,7 +3,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 export type Protocol = "ssh" | "sftp" | "ftp" | "ftps" | "rdp";
 export type AuthMethod = "password" | "key" | "agent";
 
-/** RDP 키보드: 맥 입력기가 조합한 글자를 보냄(local) / 키 신호를 보내 원격 Windows 입력기가 조합(remote) */
+/** RDP 키보드: 키 신호를 보내 원격 Windows 입력기가 조합(remote, 기본) / 맥 입력기가 조합한 글자를 보냄(local) */
 export type KeyboardMode = "local" | "remote";
 /** 원격 입력기 모드에서 원격 한/영 전환에 보내는 키 */
 export type HangulKey = "rightAlt" | "lang1" | "shiftSpace";

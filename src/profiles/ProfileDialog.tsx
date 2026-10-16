@@ -33,8 +33,8 @@ const DEFAULT_RDP: RdpSettings = {
   height: null,
   scale: null,
   hidpi: false,
-  keyboard: "local",
-  hangulKey: "rightAlt",
+  keyboard: "remote",
+  hangulKey: "lang1",
 };
 
 interface ProfileDialogProps {
@@ -370,10 +370,10 @@ export function ProfileDialog({ profile, groups, onSave, onDelete, onForgetSecre
               <span className="label">키보드 입력 방식</span>
               <select
                 value={rdp.keyboard}
-                onChange={(e) => setRdp({ keyboard: e.target.value === "remote" ? "remote" : "local" })}
+                onChange={(e) => setRdp({ keyboard: e.target.value === "local" ? "local" : "remote" })}
               >
-                <option value="local">맥 입력기 (한/영은 맥에서 전환)</option>
                 <option value="remote">원격 입력기 (한/영은 원격에서 전환)</option>
+                <option value="local">맥 입력기 (한/영은 맥에서 전환)</option>
               </select>
             </label>
             {rdp.keyboard === "remote" && (
@@ -383,8 +383,8 @@ export function ProfileDialog({ profile, groups, onSave, onDelete, onForgetSecre
                   value={rdp.hangulKey}
                   onChange={(e) => setRdp({ hangulKey: e.target.value as RdpSettings["hangulKey"] })}
                 >
-                  <option value="rightAlt">오른쪽 Alt</option>
                   <option value="lang1">한/영 키</option>
+                  <option value="rightAlt">오른쪽 Alt</option>
                   <option value="shiftSpace">Shift+Space</option>
                 </select>
               </label>

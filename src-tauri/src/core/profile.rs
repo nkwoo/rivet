@@ -87,9 +87,9 @@ impl AuthMethod {
 #[serde(rename_all = "camelCase")]
 pub enum KeyboardMode {
     /// 로컬(맥) 입력기가 조합한 글자를 유니코드로 보냄
-    #[default]
     Local,
-    /// 물리 키를 스캔 코드로 보내 원격 Windows 입력기가 조합함
+    /// 물리 키를 스캔 코드로 보내 원격 Windows 입력기가 조합함 (자음·모음이 바로 보여 기본값)
+    #[default]
     Remote,
 }
 
@@ -97,9 +97,9 @@ pub enum KeyboardMode {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum HangulKey {
-    #[default]
     RightAlt,
     /// 한국어 키보드의 한/영 키 (Lang1)
+    #[default]
     Lang1,
     ShiftSpace,
 }
@@ -579,14 +579,15 @@ mod tests {
         let old: RdpSettings =
             serde_json::from_str(r#"{"width":null,"height":null,"scale":null,"hidpi":true}"#)
                 .unwrap();
-        assert_eq!(old.keyboard, KeyboardMode::Local);
-        assert_eq!(old.hangul_key, HangulKey::RightAlt);
+        assert_eq!(old.keyboard, KeyboardMode::Remote);
+        assert_eq!(old.hangul_key, HangulKey::Lang1);
         let json = serde_json::to_value(RdpSettings {
-            keyboard: KeyboardMode::Remote,
+            keyboard: KeyboardMode::Local,
+            hangul_key: HangulKey::RightAlt,
             ..Default::default()
         })
         .unwrap();
-        assert_eq!(json["keyboard"], "remote");
+        assert_eq!(json["keyboard"], "local");
         assert_eq!(json["hangulKey"], "rightAlt");
         assert!(serde_json::from_str::<RdpSettings>(r#"{"keyboard":"other"}"#).is_err());
     }

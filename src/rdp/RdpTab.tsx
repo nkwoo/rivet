@@ -106,8 +106,9 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
   /** 맥 입력기 모드: 조합 중인 글자와 미리보기 위치 (화면 영역 기준, 마지막 클릭 위치) */
   const [composing, setComposing] = useState("");
   const caret = useRef<{ x: number; y: number } | null>(null);
-  const remoteIme = profile.rdp?.keyboard === "remote";
-  const hangulKey = profile.rdp?.hangulKey ?? "rightAlt";
+  /** 기본값: 원격 입력기, 한/영 키 (설정이 없는 프로필 포함) */
+  const remoteIme = (profile.rdp?.keyboard ?? "remote") === "remote";
+  const hangulKey = profile.rdp?.hangulKey ?? "lang1";
   const [diag, setDiag] = useState<string>("측정 중…");
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [toolbarHidden, setToolbarHidden] = useState(false);
