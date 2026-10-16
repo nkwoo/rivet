@@ -1,0 +1,8 @@
+# cargo audit 설정 (CI는 저장소 루트에서 `cargo audit --file src-tauri/Cargo.lock` 실행)
+[advisories]
+ignore = [
+  # rsa 크레이트 Marvin 타이밍 공격. russh 0.60+는 상수 시간 구현인 rsa 0.10 RC를
+  # 사용하지만 정식 릴리스가 없어 계속 보고됨. deny.toml과 같은 사유이며,
+  # rsa 0.10 정식 출시 후 두 곳의 예외를 함께 제거할 것.
+  "RUSTSEC-2023-0071",
+]

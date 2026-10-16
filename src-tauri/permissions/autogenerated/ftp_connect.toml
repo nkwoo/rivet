@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ftp-connect"
+description = "Enables the ftp_connect command without any pre-configured scope."
+commands.allow = ["ftp_connect"]
+
+[[permission]]
+identifier = "deny-ftp-connect"
+description = "Denies the ftp_connect command without any pre-configured scope."
+commands.deny = ["ftp_connect"]

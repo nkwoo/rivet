@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ssh-close"
+description = "Enables the ssh_close command without any pre-configured scope."
+commands.allow = ["ssh_close"]
+
+[[permission]]
+identifier = "deny-ssh-close"
+description = "Denies the ssh_close command without any pre-configured scope."
+commands.deny = ["ssh_close"]

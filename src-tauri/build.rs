@@ -1,8 +1,41 @@
+/// 웹뷰에서 호출 가능한 앱 명령. capabilities/default.json에서 개별로 허용해야 실제로 호출됩니다.
+const COMMANDS: &[&str] = &[
+    "app_info",
+    "profile_list",
+    "profile_create",
+    "profile_update",
+    "profile_delete",
+    "profile_forget_secret",
+    "known_hosts_list",
+    "known_hosts_remove",
+    "cert_pins_list",
+    "cert_pins_remove",
+    "ftp_connect",
+    "ssh_connect",
+    "ssh_write",
+    "ssh_resize",
+    "ssh_close",
+    "ssh_host_key_respond",
+    "local_home",
+    "local_list",
+    "sftp_open",
+    "sftp_list",
+    "sftp_mkdir",
+    "sftp_rename",
+    "sftp_remove",
+    "transfer_subscribe",
+    "transfer_upload",
+    "transfer_download",
+    "transfer_resolve",
+    "transfer_cancel",
+    "transfer_retry",
+    "transfer_clear_finished",
+];
+
 fn main() {
-    // 앱 명령은 capabilities/에서 명시적으로 허용한 것만 웹뷰에서 호출 가능
     tauri_build::try_build(
         tauri_build::Attributes::new()
-            .app_manifest(tauri_build::AppManifest::new().commands(&["app_info"])),
+            .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
     )
     .unwrap_or_else(|e| panic!("tauri build script failed: {e:#}"));
 }

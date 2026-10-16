@@ -1,0 +1,12 @@
+# 통합 테스트용 설정: 비밀번호와 공개키 인증을 모두 허용
+Port 22
+HostKey /etc/ssh/ssh_host_ed25519_key
+PermitRootLogin no
+PasswordAuthentication yes
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+# 테스트 스크립트가 바인드 마운트한 공개키 (호스트 UID 소유라 StrictModes를 끔)
+AuthorizedKeysFile /etc/rivet/authorized_keys
+StrictModes no
+Compression no
+Subsystem sftp internal-sftp

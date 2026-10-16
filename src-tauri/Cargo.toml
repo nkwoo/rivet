@@ -22,6 +22,33 @@ serde_json = "1.0.154"
 thiserror = "2.0.21"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
+async-trait = "0.1.92"
+# 0.62.5 미만은 보안 권고 대상 (docs/SECURITY.md). flate2(압축) 기능은 빼서 SSH 압축을 비활성화합니다.
+# 암호 백엔드는 Windows 빌드에 cmake/NASM이 필요 없는 ring을 사용합니다.
+russh = { version = "0.64.1", default-features = false, features = ["ring", "rsa"] }
+# russh와 같은 연결 위에 SFTP 서브시스템 채널을 엽니다. 직접 등록된 보안 권고 없음 (2026-10-16 확인)
+russh-sftp = "3.0.1"
+# FTP/FTPS. 12.1.0부터 제어 응답 크기 상한(#178)과 액티브 모드 출처 확인(#180) 반영 (2026-10-16 확인)
+# 암호 백엔드는 russh와 같은 ring. `deprecated`는 암시적 FTPS(포트 990) 연결 함수에 필요합니다.
+suppaftp = { version = "12.2.1", default-features = false, features = ["tokio-rustls-ring", "deprecated"] }
+# FTPS 인증서 검증: OS 신뢰 저장소로 확인하고, 실패하면 지문 고정(TOFU)으로 처리합니다.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rustls-platform-verifier = "0.7.1"
+# 인증서 SHA-256 지문 (russh/rustls가 이미 사용하는 크레이트)
+ring = "0.17"
+# v1 기능: macOS 키체인 / Windows 자격 증명 관리자
+keyring = "4.2.0"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+secrecy = "0.10.3"
+zeroize = "1.9.1"
+uuid = { version = "1.28.0", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+# 통합 테스트에서 russh(log 크레이트) 로그까지 수집해 비밀 값 노출 여부를 검사
+tracing-log = "0.2.0"
 
 [lints.rust]
 unsafe_code = "forbid"
@@ -34,3 +61,4 @@ expect_used = "deny"
 codegen-units = 1
 lto = true
 strip = true
+

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-transfer-resolve"
+description = "Enables the transfer_resolve command without any pre-configured scope."
+commands.allow = ["transfer_resolve"]
+
+[[permission]]
+identifier = "deny-transfer-resolve"
+description = "Denies the transfer_resolve command without any pre-configured scope."
+commands.deny = ["transfer_resolve"]
