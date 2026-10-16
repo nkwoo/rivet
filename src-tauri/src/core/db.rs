@@ -43,6 +43,16 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (host, port)
     );
     "#,
+    // v2: TLS 인증서 지문 고정 (FTPS, 이후 RDP)
+    r#"
+    CREATE TABLE cert_pins (
+        host        TEXT NOT NULL,
+        port        INTEGER NOT NULL,
+        fingerprint TEXT NOT NULL,
+        added_at    INTEGER NOT NULL,
+        PRIMARY KEY (host, port)
+    );
+    "#,
 ];
 
 /// 앱 전체가 공유하는 SQLite 연결.

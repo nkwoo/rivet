@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { Dialog } from "../components/Dialog.tsx";
 import { WarningIcon } from "../components/Icons.tsx";
 import { RivetMark } from "../RivetMark.tsx";
@@ -100,9 +101,11 @@ export function ProfileDialog({ profile, groups, onSave, onDelete, onForgetSecre
     }
   };
 
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
   const remove = async () => {
     if (!profile) return;
-    if (!window.confirm(`“${profile.name}” 연결을 삭제할까요? 키체인에 저장된 비밀번호도 함께 삭제됩니다.`)) return;
+    setConfirmingDelete(false);
     setBusy(true);
     try {
       await onDelete(profile);
@@ -122,6 +125,22 @@ export function ProfileDialog({ profile, groups, onSave, onDelete, onForgetSecre
     }
   };
 
+  // 확인 대화상자를 겹쳐 띄우면 Esc가 바깥 대화상자까지 닫으므로 잠시 바꿔 그립니다.
+  // 입력 중인 값은 이 컴포넌트의 상태에 남아 있어 취소하면 그대로 돌아옵니다.
+  if (profile && confirmingDelete) {
+    return (
+      <ConfirmDialog
+        title="연결 삭제"
+        confirmLabel="삭제"
+        onConfirm={() => void remove()}
+        onCancel={() => setConfirmingDelete(false)}
+      >
+        <p className="dialog-text">“{profile.name}” 연결을 삭제할까요?</p>
+        <p className="dialog-text muted">키체인에 저장된 비밀번호도 함께 삭제됩니다.</p>
+      </ConfirmDialog>
+    );
+  }
+
   return (
     <Dialog
       title={profile ? "연결 편집" : "새 연결"}
@@ -131,7 +150,7 @@ export function ProfileDialog({ profile, groups, onSave, onDelete, onForgetSecre
       footer={
         <>
           {profile && (
-            <button type="button" className="button button-ghost button-danger" onClick={remove} disabled={busy}>
+            <button type="button" className="button button-ghost button-danger" onClick={() => setConfirmingDelete(true)} disabled={busy}>
               삭제
             </button>
           )}
@@ -142,7 +161,7 @@ export function ProfileDialog({ profile, groups, onSave, onDelete, onForgetSecre
           <button type="submit" form="profile-form" className="button button-secondary" disabled={busy}>
             저장
           </button>
-          {form.protocol === "ssh" && (
+          {form.protocol !== "rdp" && (
             <button type="button" className="button button-primary" disabled={busy} onClick={(e) => submit(e, true)}>
               저장 후 연결
             </button>
@@ -166,8 +185,14 @@ export function ProfileDialog({ profile, groups, onSave, onDelete, onForgetSecre
               </button>
             ))}
           </div>
-          {form.protocol !== "ssh" && (
-            <p className="hint">현재 버전은 SSH 터미널만 연결할 수 있습니다. 이 프로필은 저장해 두었다가 이후 버전에서 사용할 수 있습니다.</p>
+          {form.protocol === "rdp" && (
+            <p className="hint">RDP는 아직 연결할 수 없습니다. 프로필은 저장해 두었다가 이후 버전에서 사용할 수 있습니다.</p>
+          )}
+          {form.protocol === "ftps" && (
+            <p className="hint">
+              포트 990은 암시적 TLS, 그 밖의 포트(보통 21)는 AUTH TLS로 접속합니다. 운영체제가 신뢰하지 않는 인증서는
+              지문을 확인한 뒤 고정합니다.
+            </p>
           )}
         </fieldset>
 
@@ -213,6 +238,7 @@ export function ProfileDialog({ profile, groups, onSave, onDelete, onForgetSecre
             <input
               className="mono"
               required={isSsh}
+              placeholder={form.protocol === "ftp" || form.protocol === "ftps" ? "비우면 anonymous" : undefined}
               maxLength={128}
               spellCheck={false}
               autoCapitalize="off"

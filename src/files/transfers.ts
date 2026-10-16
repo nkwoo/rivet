@@ -116,6 +116,7 @@ const ERROR_TEXT: Record<string, string> = {
   symlink: "심볼릭 링크는 따라가지 않습니다",
   timeout: "응답 시간이 초과되었습니다",
   connectionLost: "연결이 끊어졌습니다",
+  dataConnection: "서버의 데이터 포트에 연결할 수 없습니다 (FTP 패시브 모드). 방화벽이나 포트 포워딩을 확인하세요",
 };
 
 /** 백엔드 에러 코드를 한국어 문구로 바꿉니다. 모르는 코드는 서버 메시지를 그대로 씁니다. */

@@ -79,7 +79,7 @@ jobs:
         run: cargo audit --file src-tauri/Cargo.lock
 
   ssh-integration:
-    name: SSH integration (Docker OpenSSH)
+    name: SSH/FTP integration (Docker OpenSSH, vsftpd)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -99,3 +99,6 @@ jobs:
 
       - name: Run SSH integration tests
         run: src-tauri/tests/docker/run-ssh-it.sh
+
+      - name: Run FTP/FTPS integration tests
+        run: src-tauri/tests/docker/run-ftp-it.sh

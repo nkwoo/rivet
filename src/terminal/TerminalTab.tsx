@@ -6,7 +6,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 
 import { api, isApiError, toBytes, type ConnectionInfo, type Profile, type SessionEvent } from "../lib/api.ts";
-import { HostKeyChanged, HostKeyPrompt } from "../security/HostKeyDialogs.tsx";
+import { CertChanged, CertPrompt, HostKeyChanged, HostKeyPrompt } from "../security/HostKeyDialogs.tsx";
 import { SecretPrompt } from "../profiles/SecretPrompt.tsx";
 import { FileBrowser } from "../files/FileBrowser.tsx";
 import { FolderIcon, TerminalIcon } from "../components/Icons.tsx";
@@ -21,7 +21,9 @@ type Overlay =
   | { kind: "none" }
   | { kind: "secret"; mode: "password" | "passphrase"; error?: string }
   | { kind: "hostKeyPrompt"; event: Extract<SessionEvent, { type: "hostKeyPrompt" }> }
-  | { kind: "hostKeyChanged"; event: Extract<SessionEvent, { type: "hostKeyChanged" }> };
+  | { kind: "hostKeyChanged"; event: Extract<SessionEvent, { type: "hostKeyChanged" }> }
+  | { kind: "certPrompt"; event: Extract<SessionEvent, { type: "certPrompt" }> }
+  | { kind: "certChanged"; event: Extract<SessionEvent, { type: "certChanged" }> };
 
 interface TerminalTabProps {
   profile: Profile;
@@ -64,6 +66,24 @@ function takeChunk(s: string): string {
   return s.slice(0, last >= 0xd800 && last <= 0xdbff ? WRITE_CHUNK - 1 : WRITE_CHUNK);
 }
 
+/** 연결 오류 코드별 한국어 문구. 모르는 코드는 백엔드 메시지를 그대로 씁니다. */
+const SESSION_ERROR_TEXT: Record<string, string> = {
+  connect: "서버에 연결할 수 없습니다",
+  timeout: "연결 시간이 초과되었습니다",
+  authFailed: "인증에 실패했습니다",
+  hostKeyChanged: "호스트 키가 바뀌어 연결을 차단했습니다",
+  hostKeyRejected: "호스트 키를 승인하지 않아 연결을 취소했습니다",
+  certChanged: "인증서가 바뀌어 연결을 차단했습니다",
+  certRejected: "인증서를 승인하지 않아 연결을 취소했습니다",
+  tls: "TLS 연결에 실패했습니다",
+  connectionLost: "연결이 끊어졌습니다",
+};
+
+function sessionErrorText(code: string, message: string): string {
+  const text = SESSION_ERROR_TEXT[code];
+  return text ? `${text} (${message})` : message;
+}
+
 function describeExit(exitStatus: number | null): string {
   return exitStatus === null ? "세션이 종료되었습니다." : `세션이 종료되었습니다 (종료 코드 ${exitStatus}).`;
 }
@@ -89,7 +109,8 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts }: Te
   const onStateRef = useRef(onState);
   onStateRef.current = onState;
 
-  const filesOnly = profile.protocol === "sftp";
+  /** SFTP/FTP/FTPS 프로필은 셸 없이 파일 화면만 */
+  const filesOnly = profile.protocol !== "ssh";
   const [overlay, setOverlay] = useState<Overlay>({ kind: "none" });
   const [ended, setEnded] = useState(false);
   const [status, setStatus] = useState<TabState>({ kind: "connecting" });
@@ -127,6 +148,12 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts }: Te
         case "hostKeyChanged":
           setOverlay({ kind: "hostKeyChanged", event });
           break;
+        case "certPrompt":
+          setOverlay({ kind: "certPrompt", event });
+          break;
+        case "certChanged":
+          setOverlay({ kind: "certChanged", event });
+          break;
         case "connected": {
           const { type: _t, ...info } = event;
           lastError.current = null;
@@ -152,9 +179,10 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts }: Te
             setOverlay({ kind: "secret", mode: "password", error: "인증에 실패했습니다. 비밀번호를 확인하세요." });
             report({ kind: "error", message: "인증 실패" });
           } else if (err) {
-            if (err.code !== "hostKeyChanged") setOverlay({ kind: "none" });
-            term.current?.write(`\r\n\x1b[31m${err.message}\x1b[0m\r\n`);
-            report({ kind: "error", message: err.message });
+            if (err.code !== "hostKeyChanged" && err.code !== "certChanged") setOverlay({ kind: "none" });
+            const text = sessionErrorText(err.code, err.message);
+            term.current?.write(`\r\n\x1b[31m${text}\x1b[0m\r\n`);
+            report({ kind: "error", message: text });
           } else {
             const message = describeExit(event.exitStatus);
             term.current?.write(`\r\n\x1b[90m${message}\x1b[0m\r\n`);
@@ -186,15 +214,18 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts }: Te
       output.onmessage = (data) => current() && t.write(toBytes(data));
 
       try {
-        const id = await api.sshConnect({
-          profileId: profile.id,
-          cols: t.cols,
-          rows: t.rows,
-          secret,
-          saveSecret,
-          events,
-          output,
-        });
+        const isFtp = profile.protocol === "ftp" || profile.protocol === "ftps";
+        const id = isFtp
+          ? await api.ftpConnect({ profileId: profile.id, secret, saveSecret, events })
+          : await api.sshConnect({
+              profileId: profile.id,
+              cols: t.cols,
+              rows: t.rows,
+              secret,
+              saveSecret,
+              events,
+              output,
+            });
         if (!current()) {
           void api.sshClose(id);
           return;
@@ -211,7 +242,7 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts }: Te
         } else if (isApiError(e) && e.code === "keyLoad" && secret !== null) {
           setOverlay({ kind: "secret", mode: "passphrase", error: "패스프레이즈가 올바르지 않습니다." });
         } else {
-          const message = isApiError(e) ? e.message : String(e);
+          const message = isApiError(e) ? sessionErrorText(e.code, e.message) : String(e);
           t.write(`\x1b[31m${message}\x1b[0m\r\n`);
           report({ kind: "error", message });
         }
@@ -378,6 +409,31 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts }: Te
           fingerprint={overlay.event.fingerprint}
           onTrust={() => respondHostKey(true)}
           onCancel={() => respondHostKey(false)}
+        />
+      )}
+      {active && overlay.kind === "certPrompt" && (
+        <CertPrompt
+          name={profile.name}
+          host={overlay.event.host}
+          port={overlay.event.port}
+          fingerprint={overlay.event.fingerprint}
+          problem={overlay.event.problem}
+          onTrust={() => respondHostKey(true)}
+          onCancel={() => respondHostKey(false)}
+        />
+      )}
+      {active && overlay.kind === "certChanged" && (
+        <CertChanged
+          name={profile.name}
+          host={overlay.event.host}
+          port={overlay.event.port}
+          expectedFingerprint={overlay.event.expectedFingerprint}
+          actualFingerprint={overlay.event.actualFingerprint}
+          onReview={() => {
+            setOverlay({ kind: "none" });
+            onReviewKnownHosts(overlay.event.host, overlay.event.port);
+          }}
+          onClose={() => setOverlay({ kind: "none" })}
         />
       )}
       {active && overlay.kind === "hostKeyChanged" && (

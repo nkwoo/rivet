@@ -1,3 +1,4 @@
+use crate::protocols::ftp::FtpError;
 use crate::protocols::ssh::SshError;
 use crate::protocols::FsError;
 
@@ -35,6 +36,9 @@ pub enum Error {
 
     #[error(transparent)]
     Fs(#[from] FsError),
+
+    #[error(transparent)]
+    Ftp(#[from] FtpError),
 }
 
 impl Error {
@@ -48,6 +52,7 @@ impl Error {
             Error::PasswordRequired => "passwordRequired",
             Error::Ssh(e) => e.code(),
             Error::Fs(e) => e.code(),
+            Error::Ftp(e) => e.code(),
         }
     }
 }

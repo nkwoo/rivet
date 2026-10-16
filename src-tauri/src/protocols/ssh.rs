@@ -143,6 +143,8 @@ pub trait HostKeyVerifier: Send + Sync {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionInfo {
+    /// 보안 상태 종류: `ssh`, `tlsCa`(인증 기관으로 검증), `tlsPinned`(고정 지문), `plain`(암호화 없음)
+    pub transport: String,
     pub kex: String,
     pub cipher: String,
     pub host_key_algorithm: String,
@@ -284,11 +286,12 @@ impl SshConnection {
         .await
         .map_err(|_| SshError::Timeout)??;
 
-        let info = state
+        let mut info = state
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .info
             .clone();
+        info.transport = "ssh".into();
         Ok(Self { handle, info })
     }
 

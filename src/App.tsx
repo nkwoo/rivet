@@ -77,7 +77,7 @@ export default function App() {
 
   const openProfile = useCallback(
     (profile: Profile) => {
-      if (profile.protocol !== "ssh" && profile.protocol !== "sftp") {
+      if (profile.protocol === "rdp") {
         showToast(`${profile.protocol.toUpperCase()} 연결은 아직 지원하지 않습니다.`);
         return;
       }
@@ -161,8 +161,8 @@ export default function App() {
           <button
             type="button"
             className="icon-button icon-button-boxed"
-            aria-label="저장된 호스트 키"
-            title="저장된 호스트 키"
+            aria-label="저장된 호스트 키와 인증서"
+            title="저장된 호스트 키와 인증서"
             onClick={() => setKnownHosts({})}
           >
             <ShieldCheckIcon />

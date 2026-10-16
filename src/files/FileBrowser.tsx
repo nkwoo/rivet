@@ -8,8 +8,9 @@ import {
   type Listing,
   type OverwritePolicy,
   type Profile,
+  protocolLabel,
 } from "../lib/api.ts";
-import { DownloadIcon, FolderPlusIcon, EditIcon, TrashIcon, UploadIcon } from "../components/Icons.tsx";
+import { DownloadIcon, FolderPlusIcon, EditIcon, TrashIcon, UploadIcon, WarningIcon } from "../components/Icons.tsx";
 import { FilePane, emptyPane, type PaneState, type Side } from "./FilePane.tsx";
 import { TransferQueue } from "./TransferQueue.tsx";
 import { ConflictDialog, DeleteDialog, NameDialog } from "./FileDialogs.tsx";
@@ -265,8 +266,8 @@ export function FileBrowser({ sessionId, profile, active }: FileBrowserProps) {
     <div className="files" ref={root}>
       <header className="files-head">
         <span className="files-title">전송</span>
-        <span className="files-badge mono">
-          {profile.name} · SFTP
+        <span className={`files-badge mono ${profile.protocol === "ftp" ? "is-plain" : ""}`}>
+          {profile.name} · {profile.protocol === "ssh" ? "SFTP" : protocolLabel(profile.protocol)}
         </span>
         <div className="files-actions">
           <label htmlFor={`policy-${sessionId}`} className="files-policy-label">
@@ -304,6 +305,13 @@ export function FileBrowser({ sessionId, profile, active }: FileBrowserProps) {
           </button>
         </div>
       </header>
+
+      {profile.protocol === "ftp" && (
+        <div role="note" className="files-plain">
+          <WarningIcon />
+          <span>평문 FTP 연결입니다. 비밀번호와 파일 내용이 암호화되지 않고 전송됩니다. 가능하면 FTPS나 SFTP를 사용하세요.</span>
+        </div>
+      )}
 
       {notice && (
         <div role="alert" className="files-notice">

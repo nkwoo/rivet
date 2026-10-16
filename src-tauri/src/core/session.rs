@@ -6,6 +6,9 @@
 //!
 //! 인증된 연결은 슬롯에 보관해 파일 탐색기가 같은 연결 위에 SFTP 채널을 열 수 있게 합니다.
 //! SFTP 프로필은 셸 없이 연결만 유지합니다.
+//!
+//! FTP/FTPS 세션은 셸이 없고 파일 시스템(`FtpFs`)만 보관합니다. FTPS 인증서를 OS가 신뢰하지
+//! 않으면 고정 지문과 비교해 바뀐 인증서는 차단하고, 처음 보는 인증서는 사용자 승인을 받습니다.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -19,15 +22,18 @@ use serde::Serialize;
 use tokio::sync::{mpsc, oneshot, OnceCell};
 use tokio::task::AbortHandle;
 
+use crate::core::cert_pins::{CertPinStore, PinStatus};
 use crate::core::known_hosts::{fingerprint, HostKeyStatus, KnownHostsStore};
 use crate::core::profile::{AuthMethod, Profile, Protocol};
 use crate::core::secrets::SecretStore;
 use crate::error::{Error, Result};
+use crate::protocols::ftp::{self, FtpConnectionInfo, FtpError, FtpFs, FtpSecurity, FtpTarget};
 use crate::protocols::sftp::SftpFs;
 use crate::protocols::ssh::{
     load_private_key, ConnectionInfo, HostKeyVerdict, HostKeyVerifier, ShellCommand, SshAuth,
     SshConnection, SshTarget,
 };
+use crate::protocols::tls::CertTrust;
 use crate::protocols::{RemoteFs, RemoteSession};
 
 /// 처음 보는 호스트 키에 대한 사용자 응답 대기 시간
@@ -38,6 +44,8 @@ const COMMAND_QUEUE: usize = 256;
 pub const MAX_TERMINAL_DIM: u32 = 1000;
 /// 셸 없는(SFTP 전용) 세션에서 연결 끊김을 확인하는 간격
 const LIVENESS_INTERVAL: Duration = Duration::from_secs(5);
+/// FTP 탐색 연결이 서버 유휴 시간 제한에 걸리지 않도록 NOOP을 보내는 간격
+const FTP_KEEPALIVE: Duration = Duration::from_secs(30);
 
 pub type SessionId = String;
 
@@ -61,6 +69,21 @@ pub enum SessionEvent {
         host: String,
         port: u16,
         algorithm: String,
+        expected_fingerprint: String,
+        actual_fingerprint: String,
+    },
+    /// FTPS 인증서를 OS가 신뢰하지 않음: 지문을 보여주고 승인을 기다림
+    CertPrompt {
+        host: String,
+        port: u16,
+        fingerprint: String,
+        /// `unknownIssuer`, `badName`, `expired`, `invalid`
+        problem: String,
+    },
+    /// 고정된 인증서와 다름: 연결을 차단함
+    CertChanged {
+        host: String,
+        port: u16,
         expected_fingerprint: String,
         actual_fingerprint: String,
     },
@@ -155,6 +178,110 @@ pub fn prepare_ssh_request(
         pty,
         on_authenticated,
     })
+}
+
+/// FTP 세션 시작 요청
+pub struct FtpSessionRequest {
+    pub target: FtpTarget,
+    pub password: SecretString,
+    pub on_authenticated: Option<Box<dyn FnOnce() + Send>>,
+}
+
+/// 비밀번호를 묻지 않는 익명 FTP 사용자명
+fn is_anonymous(user: &str) -> bool {
+    user.eq_ignore_ascii_case("anonymous") || user.eq_ignore_ascii_case("ftp")
+}
+
+/// 프로필로 FTP/FTPS 세션 요청을 만듭니다. FTPS는 포트 990이면 암시적 TLS, 아니면 AUTH TLS입니다.
+pub fn prepare_ftp_request(
+    profile: &Profile,
+    provided_secret: Option<SecretString>,
+    save_secret: bool,
+    secrets: Arc<dyn SecretStore>,
+) -> Result<FtpSessionRequest> {
+    let security = match profile.protocol {
+        Protocol::Ftp => FtpSecurity::Plain,
+        Protocol::Ftps if profile.port == 990 => FtpSecurity::Implicit,
+        Protocol::Ftps => FtpSecurity::Explicit,
+        _ => return Err(Error::Invalid("profile is not an FTP/FTPS profile".into())),
+    };
+    let username = if profile.username.is_empty() {
+        "anonymous".to_owned()
+    } else {
+        profile.username.clone()
+    };
+    ftp::check_arg(&username)
+        .map_err(|_| Error::Invalid("username contains line breaks".into()))?;
+
+    let from_user = provided_secret.is_some();
+    let secret = match provided_secret {
+        Some(s) => Some(s),
+        None => secrets.get(&profile.id)?,
+    };
+    let password = match secret.clone() {
+        Some(p) => p,
+        None if is_anonymous(&username) => SecretString::from("rivet@"),
+        None => return Err(Error::PasswordRequired),
+    };
+    if ftp::check_arg(secrecy::ExposeSecret::expose_secret(&password)).is_err() {
+        return Err(Error::Invalid("password contains line breaks".into()));
+    }
+
+    let on_authenticated: Option<Box<dyn FnOnce() + Send>> = match secret {
+        Some(secret) if from_user && save_secret => {
+            let id = profile.id.clone();
+            Some(Box::new(move || {
+                if let Err(e) = secrets.set(&id, &secret) {
+                    tracing::warn!(error = %e, "could not save secret to keychain");
+                }
+            }))
+        }
+        _ => None,
+    };
+
+    Ok(FtpSessionRequest {
+        target: FtpTarget {
+            host: profile.host.clone(),
+            port: profile.port,
+            username,
+            security,
+        },
+        password,
+        on_authenticated,
+    })
+}
+
+fn ftp_connection_info(info: &FtpConnectionInfo) -> ConnectionInfo {
+    let (transport, kex) = match (info.security, info.trust) {
+        (FtpSecurity::Plain, _) => ("plain", "FTP"),
+        (FtpSecurity::Explicit, trust) => (
+            if trust == Some(CertTrust::Pinned) {
+                "tlsPinned"
+            } else {
+                "tlsCa"
+            },
+            "FTPS AUTH TLS",
+        ),
+        (FtpSecurity::Implicit, trust) => (
+            if trust == Some(CertTrust::Pinned) {
+                "tlsPinned"
+            } else {
+                "tlsCa"
+            },
+            "FTPS implicit TLS",
+        ),
+    };
+    ConnectionInfo {
+        transport: transport.into(),
+        kex: kex.into(),
+        cipher: String::new(),
+        host_key_algorithm: if info.fingerprint.is_some() {
+            "X.509".into()
+        } else {
+            String::new()
+        },
+        fingerprint: info.fingerprint.clone().unwrap_or_default(),
+    }
 }
 
 pub fn check_terminal_size(cols: u32, rows: u32) -> Result<(u32, u32)> {
@@ -281,13 +408,40 @@ impl SessionManager {
         Ok(())
     }
 
-    /// 세션의 SSH 연결 위에 SFTP를 엽니다. 이미 열려 있으면 그것을 돌려줍니다.
+    /// FTP/FTPS 세션을 백그라운드에서 시작하고 즉시 ID를 돌려줍니다.
+    pub fn spawn_ftp(
+        self: &Arc<Self>,
+        request: FtpSessionRequest,
+        pins: Arc<CertPinStore>,
+        sink: Arc<dyn SessionSink>,
+    ) -> SessionId {
+        let id = uuid::Uuid::new_v4().to_string();
+        let (tx, rx) = mpsc::channel(COMMAND_QUEUE);
+        self.slots().insert(id.clone(), Slot::new(tx));
+        let manager = Arc::downgrade(self);
+        let session_id = id.clone();
+        let task = tokio::spawn(async move {
+            run_ftp_session(request, pins, manager.clone(), session_id.clone(), rx, sink).await;
+            if let Some(m) = manager.upgrade() {
+                m.slots().remove(&session_id);
+            }
+        });
+        if let Some(slot) = self.slots().get_mut(&id) {
+            slot.task = Some(task.abort_handle());
+        }
+        id
+    }
+
+    /// 세션의 원격 파일 시스템. SSH 세션이면 같은 연결 위에 SFTP를 처음 한 번 엽니다.
     pub async fn remote_fs(&self, id: &str) -> Result<Arc<dyn RemoteFs>> {
         let (conn, cell) = {
             let slots = self.slots();
             let slot = slots
                 .get(id)
                 .ok_or_else(|| Error::NotFound(format!("session {id}")))?;
+            if let Some(fs) = slot.fs.get() {
+                return Ok(fs.clone());
+            }
             let conn = slot
                 .conn
                 .clone()
@@ -317,6 +471,12 @@ impl SessionManager {
         for slot in slots {
             slot.shutdown();
         }
+    }
+
+    fn set_fs(&self, id: &str, fs: Arc<dyn RemoteFs>) -> bool {
+        self.slots()
+            .get(id)
+            .is_some_and(|slot| slot.fs.set(fs).is_ok())
     }
 
     fn set_connection(&self, id: &str, conn: Arc<SshConnection>) -> bool {
@@ -405,6 +565,122 @@ async fn run_ssh_session(
             sink.event(SessionEvent::Closed { exit_status: None });
         }
     }
+}
+
+async fn run_ftp_session(
+    request: FtpSessionRequest,
+    pins: Arc<CertPinStore>,
+    manager: Weak<SessionManager>,
+    id: SessionId,
+    mut commands: mpsc::Receiver<ShellCommand>,
+    sink: Arc<dyn SessionSink>,
+) {
+    let FtpSessionRequest {
+        target,
+        password,
+        on_authenticated,
+    } = request;
+
+    let result = async {
+        let fs = connect_ftp(&target, &password, &pins, &manager, &id, &sink).await?;
+        tracing::info!(host = %target.host, port = target.port, "ftp authenticated");
+        if let Some(callback) = on_authenticated {
+            callback();
+        }
+        let info = ftp_connection_info(fs.info());
+        let fs = Arc::new(fs);
+        let stored = manager.upgrade().is_some_and(|m| m.set_fs(&id, fs.clone()));
+        if !stored {
+            return Ok(());
+        }
+        sink.event(SessionEvent::Connected { info });
+
+        let mut tick = tokio::time::interval(FTP_KEEPALIVE);
+        tick.tick().await;
+        loop {
+            tokio::select! {
+                cmd = commands.recv() => if cmd.is_none() { return Ok::<_, Error>(()) },
+                _ = tick.tick() => fs.keepalive().await,
+            }
+        }
+    }
+    .await;
+
+    match result {
+        Ok(()) => sink.event(SessionEvent::Closed { exit_status: None }),
+        Err(e) => {
+            tracing::warn!(host = %target.host, port = target.port, code = e.code(), "ftp session failed");
+            sink.event(SessionEvent::Error {
+                code: e.code().into(),
+                message: e.to_string(),
+            });
+            sink.event(SessionEvent::Closed { exit_status: None });
+        }
+    }
+}
+
+/// FTP 접속. 신뢰할 수 없는 인증서는 고정 지문과 비교하거나 사용자 승인을 받습니다.
+async fn connect_ftp(
+    target: &FtpTarget,
+    password: &SecretString,
+    pins: &CertPinStore,
+    manager: &Weak<SessionManager>,
+    id: &str,
+    sink: &Arc<dyn SessionSink>,
+) -> Result<FtpFs> {
+    // 첫 시도에서 승인받으면 고정 지문을 넣어 한 번 더 연결합니다.
+    for _ in 0..2 {
+        let pinned = pins.pinned(&target.host, target.port)?;
+        let (fingerprint, problem) =
+            match FtpFs::connect(target.clone(), password.clone(), pinned).await {
+                Ok(fs) => return Ok(fs),
+                Err(FtpError::CertUntrusted {
+                    fingerprint,
+                    problem,
+                }) => (fingerprint, problem),
+                Err(e) => return Err(e.into()),
+            };
+        match pins.check(&target.host, target.port, &fingerprint)? {
+            PinStatus::Changed { known } => {
+                tracing::warn!(host = %target.host, port = target.port, "certificate changed; connection blocked");
+                sink.event(SessionEvent::CertChanged {
+                    host: target.host.clone(),
+                    port: target.port,
+                    expected_fingerprint: known.fingerprint.clone(),
+                    actual_fingerprint: fingerprint.clone(),
+                });
+                return Err(FtpError::CertChanged {
+                    expected: known.fingerprint,
+                    actual: fingerprint,
+                }
+                .into());
+            }
+            // 고정 지문과 같은데도 거부됨 (서명 오류 등)
+            PinStatus::Pinned => {
+                return Err(FtpError::Tls(format!("certificate rejected ({problem})")).into())
+            }
+            PinStatus::Unknown => {
+                let (tx, rx) = oneshot::channel();
+                let registered = manager
+                    .upgrade()
+                    .is_some_and(|m| m.set_host_key_reply(id, tx));
+                if !registered {
+                    return Err(FtpError::CertRejected.into());
+                }
+                sink.event(SessionEvent::CertPrompt {
+                    host: target.host.clone(),
+                    port: target.port,
+                    fingerprint: fingerprint.clone(),
+                    problem,
+                });
+                match tokio::time::timeout(HOST_KEY_PROMPT_TIMEOUT, rx).await {
+                    Ok(Ok(true)) => pins.pin(&target.host, target.port, &fingerprint)?,
+                    _ => return Err(FtpError::CertRejected.into()),
+                }
+            }
+        }
+    }
+    Err(FtpError::Tls("certificate is still not trusted".into()).into())
 }
 
 /// 셸 없는 세션: 탭이 닫히거나 서버가 연결을 끊을 때까지 기다립니다.

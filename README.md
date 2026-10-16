@@ -35,7 +35,7 @@ cargo audit --file src-tauri/Cargo.lock                  # cargo install --locke
 npm audit
 ```
 
-### SSH / SFTP 통합 테스트
+### SSH / SFTP / FTP 통합 테스트
 
 Docker로 테스트용 OpenSSH 서버를 띄우고 `#[ignore]`된 통합 테스트를 실행합니다. (Docker 필요)
 
@@ -43,6 +43,18 @@ Docker로 테스트용 OpenSSH 서버를 띄우고 `#[ignore]`된 통합 테스�
 src-tauri/tests/docker/run-ssh-it.sh             # 전체 (대용량 전송은 64MB)
 src-tauri/tests/docker/run-ssh-it.sh sftp        # 이름에 sftp가 들어간 테스트만
 RIVET_IT_BIG_MB=1024 src-tauri/tests/docker/run-ssh-it.sh sftp_large   # 1GB 전송
+src-tauri/tests/docker/run-ftp-it.sh             # FTP / FTPS (vsftpd, 로컬 포트 2121·990·21100-21119 사용)
+```
+
+앱으로 직접 확인할 FTP 서버는 패시브 데이터 포트(21100-21119)를 **같은 번호로** 함께 열어야 합니다.
+제어 포트만 열면 로그인은 되지만 목록·전송에서 "데이터 포트에 연결할 수 없습니다" 오류가 납니다.
+
+```bash
+docker build -t rivet-it-vsftpd src-tauri/tests/docker/vsftpd
+docker run -d --name rivet-dev-vsftpd \
+  -p 127.0.0.1:2121:21 -p 127.0.0.1:990:990 -p 127.0.0.1:21100-21119:21100-21119 rivet-it-vsftpd
+# 프로필: 호스트 127.0.0.1, 사용자 rivet / rivet-it-password
+#   FTP·FTPS(AUTH TLS) → 포트 2121, 암시적 FTPS → 포트 990
 ```
 
 로컬 키체인을 실제로 쓰는 테스트는 `cargo test --manifest-path src-tauri/Cargo.toml -- --ignored keyring`으로 따로 실행합니다.

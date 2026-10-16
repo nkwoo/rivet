@@ -1,4 +1,4 @@
-import { ShieldCheckIcon } from "./components/Icons.tsx";
+import { ShieldCheckIcon, WarningIcon } from "./components/Icons.tsx";
 import type { AppInfo } from "./App.tsx";
 import type { TabState } from "./terminal/TerminalTab.tsx";
 
@@ -24,13 +24,37 @@ export function StatusBar({ app, state }: StatusBarProps) {
             <span className="dot dot-on" />
             연결됨
           </span>
-          <span>
-            {state.info.kex} · {state.info.cipher}
-          </span>
-          <span className="status-item status-ok" title="known_hosts와 일치하는 호스트 키">
-            <ShieldCheckIcon />
-            {state.info.hostKeyAlgorithm} {state.info.fingerprint} 검증됨
-          </span>
+          {state.info.transport === "ssh" && (
+            <>
+              <span title="키 교환 · 암호화">
+                {state.info.kex} · {state.info.cipher}
+              </span>
+              <span className="status-item status-ok" title="known_hosts와 일치하는 호스트 키">
+                <ShieldCheckIcon />
+                {state.info.hostKeyAlgorithm} {state.info.fingerprint} 검증됨
+              </span>
+            </>
+          )}
+          {(state.info.transport === "tlsCa" || state.info.transport === "tlsPinned") && (
+            <>
+              <span>{state.info.kex}</span>
+              <span
+                className="status-item status-ok"
+                title={`서버 인증서 SHA-256 ${state.info.fingerprint}`}
+              >
+                <ShieldCheckIcon />
+                {state.info.transport === "tlsCa"
+                  ? "인증 기관이 검증한 인증서"
+                  : `고정한 인증서와 일치 ${state.info.fingerprint.slice(0, 23)}…`}
+              </span>
+            </>
+          )}
+          {state.info.transport === "plain" && (
+            <span className="status-item status-warn" title="비밀번호와 파일 내용이 암호화되지 않습니다">
+              <WarningIcon />
+              FTP · 암호화되지 않은 연결
+            </span>
+          )}
         </>
       )}
       {state?.kind === "closed" && <span className="muted">{state.message}</span>}

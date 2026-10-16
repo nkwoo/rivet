@@ -43,7 +43,18 @@ export interface KnownHost {
   addedAt: number;
 }
 
+export interface CertPin {
+  host: string;
+  port: number;
+  fingerprint: string;
+  addedAt: number;
+}
+
+/** 보안 상태: SSH, 인증 기관이 검증한 TLS, 고정 지문 TLS, 암호화 없음 */
+export type Transport = "ssh" | "tlsCa" | "tlsPinned" | "plain";
+
 export interface ConnectionInfo {
+  transport: Transport;
   kex: string;
   cipher: string;
   hostKeyAlgorithm: string;
@@ -60,6 +71,8 @@ export type SessionEvent =
       expectedFingerprint: string;
       actualFingerprint: string;
     }
+  | { type: "certPrompt"; host: string; port: number; fingerprint: string; problem: string }
+  | { type: "certChanged"; host: string; port: number; expectedFingerprint: string; actualFingerprint: string }
   | ({ type: "connected" } & ConnectionInfo)
   | { type: "closed"; exitStatus: number | null }
   | { type: "error"; code: string; message: string };
@@ -148,6 +161,8 @@ export const api = {
   forgetSecret: (id: string) => invoke<void>("profile_forget_secret", { id }),
 
   listKnownHosts: () => invoke<KnownHost[]>("known_hosts_list"),
+  listCertPins: () => invoke<CertPin[]>("cert_pins_list"),
+  removeCertPin: (host: string, port: number) => invoke<void>("cert_pins_remove", { host, port }),
   removeKnownHost: (host: string, port: number) =>
     invoke<void>("known_hosts_remove", { host, port }),
 
@@ -160,6 +175,12 @@ export const api = {
     events: Channel<SessionEvent>;
     output: Channel<ArrayBuffer>;
   }) => invoke<string>("ssh_connect", args),
+  ftpConnect: (args: {
+    profileId: string;
+    secret: string | null;
+    saveSecret: boolean;
+    events: Channel<SessionEvent>;
+  }) => invoke<string>("ftp_connect", args),
   sshWrite: (sessionId: string, data: string) => invoke<void>("ssh_write", { sessionId, data }),
   sshResize: (sessionId: string, cols: number, rows: number) =>
     invoke<void>("ssh_resize", { sessionId, cols, rows }),
@@ -197,4 +218,9 @@ export function toBytes(data: unknown): Uint8Array {
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
   if (Array.isArray(data)) return Uint8Array.from(data as number[]);
   return new Uint8Array();
+}
+
+/** 파일 화면/상태 표시줄에 쓰는 프로토콜 이름 */
+export function protocolLabel(protocol: Protocol): string {
+  return protocol.toUpperCase();
 }

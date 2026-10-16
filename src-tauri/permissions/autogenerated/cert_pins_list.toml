@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cert-pins-list"
+description = "Enables the cert_pins_list command without any pre-configured scope."
+commands.allow = ["cert_pins_list"]
+
+[[permission]]
+identifier = "deny-cert-pins-list"
+description = "Denies the cert_pins_list command without any pre-configured scope."
+commands.deny = ["cert_pins_list"]

@@ -1,6 +1,7 @@
 //! 프로토콜과 무관한 앱 핵심 로직.
 
 pub mod app_info;
+pub mod cert_pins;
 pub mod db;
 pub mod known_hosts;
 pub mod profile;
@@ -11,6 +12,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::error::Result;
+use cert_pins::CertPinStore;
 use db::Database;
 use known_hosts::KnownHostsStore;
 use profile::ProfileStore;
@@ -23,6 +25,7 @@ use crate::transfer::TransferManager;
 pub struct AppState {
     pub profiles: ProfileStore,
     pub known_hosts: Arc<KnownHostsStore>,
+    pub cert_pins: Arc<CertPinStore>,
     pub secrets: Arc<dyn SecretStore>,
     pub sessions: Arc<SessionManager>,
     pub transfers: Arc<TransferManager>,
@@ -39,7 +42,8 @@ impl AppState {
     pub fn with(db: Arc<Database>, secrets: Arc<dyn SecretStore>) -> Self {
         Self {
             profiles: ProfileStore::new(db.clone()),
-            known_hosts: Arc::new(KnownHostsStore::new(db)),
+            known_hosts: Arc::new(KnownHostsStore::new(db.clone())),
+            cert_pins: Arc::new(CertPinStore::new(db)),
             secrets,
             sessions: SessionManager::new(),
             transfers: TransferManager::new(),

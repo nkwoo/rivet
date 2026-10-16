@@ -55,7 +55,7 @@ export function SecretPrompt({ kind, name, target, error, onSubmit, onCancel }: 
           <input ref={input} type="password" autoComplete="off" spellCheck={false} />
         </label>
         <label className="checkbox">
-          <input ref={save} type="checkbox" defaultChecked />
+          <input ref={save} type="checkbox" />
           <span>시스템 키체인에 저장 (macOS 키체인 / Windows 자격 증명 관리자). 인증에 성공한 경우에만 저장합니다.</span>
         </label>
         {error && (

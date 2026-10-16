@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod files;
+pub mod ftp;
 pub mod known_hosts;
 pub mod profiles;
 pub mod ssh;

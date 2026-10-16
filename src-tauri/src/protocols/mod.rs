@@ -4,6 +4,7 @@ pub mod ftp;
 pub mod rdp;
 pub mod sftp;
 pub mod ssh;
+pub mod tls;
 
 use async_trait::async_trait;
 use serde::Serialize;
@@ -75,6 +76,9 @@ pub enum FsError {
     Timeout,
     #[error("connection lost")]
     ConnectionLost,
+    /// FTP 패시브 모드에서 서버가 알려준 데이터 포트에 접속하지 못함 (방화벽, 포트 포워딩)
+    #[error("cannot open the data connection to the server")]
+    DataConnection,
     #[error("{0}")]
     Remote(String),
     #[error("{0}")]
@@ -93,6 +97,7 @@ impl FsError {
             FsError::Symlink => "symlink",
             FsError::Timeout => "timeout",
             FsError::ConnectionLost => "connectionLost",
+            FsError::DataConnection => "dataConnection",
             FsError::Remote(_) => "remote",
             FsError::Io(_) => "io",
         }
@@ -102,7 +107,8 @@ impl FsError {
     pub fn is_transient(&self) -> bool {
         use std::io::ErrorKind::*;
         match self {
-            FsError::Timeout | FsError::ConnectionLost => true,
+            // 데이터 포트 접속 실패는 설정 문제일 수도 있지만 순간적인 거부도 흔해 몇 번 다시 시도합니다.
+            FsError::Timeout | FsError::ConnectionLost | FsError::DataConnection => true,
             FsError::Io(e) => matches!(
                 e.kind(),
                 TimedOut

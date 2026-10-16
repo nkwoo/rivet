@@ -544,6 +544,37 @@ textarea {
   color: var(--error);
 }
 
+.status-warn {
+  color: var(--warn);
+}
+
+.status-warn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.files-plain {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: #2a1e14;
+  border-bottom: 1px solid #5a3a2a;
+  color: var(--warn-text);
+  font-size: 13px;
+}
+
+.files-plain svg {
+  flex: none;
+  color: var(--warn);
+}
+
+.files-badge.is-plain {
+  color: var(--warn);
+  border-color: #6b4128;
+}
+
 .statusbar-end {
   margin-left: auto;
 }
@@ -1430,4 +1461,16 @@ textarea {
     order: 1;
     flex-basis: 100%;
   }
+}
+
+.dialog-section {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+.table .fingerprint {
+  word-break: break-all;
 }

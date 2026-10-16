@@ -33,6 +33,18 @@ const MAX_TREE_DEPTH: usize = 32;
 const MAX_TREE_ITEMS: usize = 10_000;
 const CHUNK: usize = 256 * 1024;
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(150);
+/// 읽기/쓰기/완료 확인이 이 시간 동안 진행되지 않으면 시간 초과로 보고 다시 시도합니다.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// 진행이 멈춘 전송을 시간 초과(일시적 오류)로 끝냅니다.
+async fn idle_limit<T>(
+    fut: impl std::future::Future<Output = std::io::Result<T>>,
+) -> Result<T, FsError> {
+    match tokio::time::timeout(IDLE_TIMEOUT, fut).await {
+        Ok(result) => result.map_err(io_to_fs),
+        Err(_) => Err(FsError::Timeout),
+    }
+}
 
 pub type JobId = String;
 
@@ -712,7 +724,7 @@ impl TransferManager {
             .map_err(local::map_io)?;
         let mut dst = plan.fs.open_write(&plan.target).await?;
         self.pump(id, &mut src, &mut dst).await?;
-        dst.shutdown().await.map_err(io_to_fs)
+        idle_limit(dst.shutdown()).await
     }
 
     async fn download(&self, id: &str, plan: &Plan) -> Result<(), FsError> {
@@ -758,11 +770,11 @@ impl TransferManager {
         let mut last_emit = Instant::now();
         let mut last_total = 0u64;
         loop {
-            let n = src.read(&mut buf).await.map_err(io_to_fs)?;
+            let n = idle_limit(src.read(&mut buf)).await?;
             if n == 0 {
                 break;
             }
-            dst.write_all(&buf[..n]).await.map_err(io_to_fs)?;
+            idle_limit(dst.write_all(&buf[..n])).await?;
             total += n as u64;
             let elapsed = last_emit.elapsed();
             if elapsed >= PROGRESS_INTERVAL {
