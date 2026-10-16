@@ -10,6 +10,7 @@
     "allow-profile-update",
     "allow-profile-delete",
     "allow-profile-forget-secret",
+    "allow-ssh-config-scan",
     "allow-known-hosts-list",
     "allow-known-hosts-remove",
     "allow-cert-pins-list",

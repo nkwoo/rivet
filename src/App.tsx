@@ -8,6 +8,7 @@ import { PlusIcon, SearchIcon, ShieldCheckIcon } from "./components/Icons.tsx";
 import { Sidebar } from "./profiles/Sidebar.tsx";
 import { ProfileDialog } from "./profiles/ProfileDialog.tsx";
 import { KnownHostsDialog } from "./security/KnownHostsDialog.tsx";
+import { ImportSshConfigDialog } from "./profiles/ImportSshConfigDialog.tsx";
 import { TabBar, type TabInfo } from "./terminal/TabBar.tsx";
 import { TerminalTab, type TabState } from "./terminal/TerminalTab.tsx";
 import { RdpTab } from "./rdp/RdpTab.tsx";
@@ -33,6 +34,7 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   /** RDP 전체 화면: 상단/사이드바/탭/상태 표시줄을 숨김 */
   const [immersive, setImmersive] = useState(false);
+  const [importing, setImporting] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const showToast = useCallback((message: string) => {
@@ -116,6 +118,7 @@ export default function App() {
   // macOS ⌘W (menu.rs): 열린 대화상자 → 활성 탭(연결 종료) → 창 순서로 닫음
   const closeTopmost = () => {
     if (profileDialog) setProfileDialog(null);
+    else if (importing) setImporting(false);
     else if (knownHosts) setKnownHosts(null);
     else if (activeTab) closeTab(activeTab);
     else void getCurrentWindow().close();
@@ -174,6 +177,7 @@ export default function App() {
           activeProfileId={activeProfileId}
           onOpen={openProfile}
           onEdit={(profile) => setProfileDialog({ profile })}
+          onImport={() => setImporting(true)}
         />
         <main className="main">
           {tabs.length > 0 && (
@@ -229,6 +233,16 @@ export default function App() {
           onDelete={deleteProfile}
           onForgetSecret={(p) => api.forgetSecret(p.id)}
           onClose={() => setProfileDialog(null)}
+        />
+      )}
+      {importing && (
+        <ImportSshConfigDialog
+          profiles={profiles}
+          onImported={(count) => {
+            loadProfiles();
+            showToast(`~/.ssh/config에서 연결 ${count}개를 가져왔습니다.`);
+          }}
+          onClose={() => setImporting(false)}
         />
       )}
       {knownHosts && <KnownHostsDialog highlight={knownHosts.highlight} onClose={() => setKnownHosts(null)} />}

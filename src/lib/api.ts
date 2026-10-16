@@ -54,6 +54,16 @@ export interface ProfileInput {
   rdp: RdpSettings | null;
 }
 
+/** `~/.ssh/config`의 가져오기 후보 */
+export interface SshConfigHost {
+  alias: string;
+  host: string;
+  port: number;
+  user: string;
+  identityFile: string | null;
+  proxyJump: string | null;
+}
+
 export interface KnownHost {
   host: string;
   port: number;
@@ -188,6 +198,7 @@ export const api = {
     invoke<Profile>("profile_update", { id, input }),
   deleteProfile: (id: string) => invoke<void>("profile_delete", { id }),
   forgetSecret: (id: string) => invoke<void>("profile_forget_secret", { id }),
+  sshConfigScan: () => invoke<SshConfigHost[]>("ssh_config_scan"),
 
   listKnownHosts: () => invoke<KnownHost[]>("known_hosts_list"),
   listCertPins: () => invoke<CertPin[]>("cert_pins_list"),

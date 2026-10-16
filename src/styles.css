@@ -1680,3 +1680,32 @@ textarea {
   pointer-events: none;
   white-space: pre;
 }
+
+/* ---------- ~/.ssh/config 가져오기 ---------- */
+
+.sidebar-footer {
+  margin-top: auto;
+  padding: 12px 8px 0;
+  font-size: 12.5px;
+}
+
+.import-list {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+}
+
+.import-list .table td {
+  vertical-align: top;
+}
+
+.tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: #232830;
+  color: var(--text-muted);
+  font-size: 11px;
+}

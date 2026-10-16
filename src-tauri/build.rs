@@ -6,6 +6,7 @@ const COMMANDS: &[&str] = &[
     "profile_update",
     "profile_delete",
     "profile_forget_secret",
+    "ssh_config_scan",
     "known_hosts_list",
     "known_hosts_remove",
     "cert_pins_list",

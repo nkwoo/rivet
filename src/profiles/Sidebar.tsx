@@ -11,6 +11,7 @@ interface SidebarProps {
   activeProfileId: string | null;
   onOpen: (profile: Profile) => void;
   onEdit: (profile: Profile) => void;
+  onImport: () => void;
 }
 
 const UNGROUPED = "그룹 없음";
@@ -25,7 +26,7 @@ export function matchesQuery(p: Profile, query: string): boolean {
   );
 }
 
-export function Sidebar({ profiles, query, connectedIds, activeProfileId, onOpen, onEdit }: SidebarProps) {
+export function Sidebar({ profiles, query, connectedIds, activeProfileId, onOpen, onEdit, onImport }: SidebarProps) {
   const groups = useMemo(() => {
     const filtered = profiles.filter((p) => matchesQuery(p, query));
     const map = new Map<string, Profile[]>();
@@ -42,6 +43,7 @@ export function Sidebar({ profiles, query, connectedIds, activeProfileId, onOpen
     return (
       <nav aria-label="연결 목록" className="sidebar">
         <p className="sidebar-empty">저장된 연결이 없습니다. 오른쪽 위의 “새 연결”로 추가하세요.</p>
+        <ImportButton onImport={onImport} />
       </nav>
     );
   }
@@ -98,6 +100,17 @@ export function Sidebar({ profiles, query, connectedIds, activeProfileId, onOpen
           </ul>
         </section>
       ))}
+      <ImportButton onImport={onImport} />
     </nav>
+  );
+}
+
+function ImportButton({ onImport }: { onImport: () => void }) {
+  return (
+    <div className="sidebar-footer">
+      <button type="button" className="link-button" onClick={onImport}>
+        ~/.ssh/config 가져오기
+      </button>
+    </div>
   );
 }
