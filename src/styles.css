@@ -1709,3 +1709,37 @@ textarea {
   color: var(--text-muted);
   font-size: 11px;
 }
+
+/* ---------- 사이드바 선택 삭제 ---------- */
+
+.sidebar-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px 10px;
+  font-size: 12.5px;
+}
+
+.sidebar-select-all {
+  margin-right: auto;
+  font-size: 12.5px;
+}
+
+.host-group-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.host-check {
+  flex: none;
+  margin: 0;
+  pointer-events: none;
+}
+
+.host-row.is-selected {
+  background: #1e2a38;
+}

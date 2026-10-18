@@ -108,11 +108,39 @@ export default function App() {
     if (connect) openProfile(saved);
   };
 
-  const deleteProfile = async (profile: Profile) => {
-    await api.deleteProfile(profile.id);
-    setProfileDialog(null);
+  /** 탭을 닫습니다. 탭이 사라지면 그 탭의 세션도 끊깁니다 (각 탭의 정리 코드). */
+  const closeTabsOf = (profileIds: Set<string>) => {
+    if (!tabs.some((t) => profileIds.has(t.profile.id))) return;
+    const index = tabs.findIndex((t) => t.id === activeTab);
+    const next = tabs.filter((t) => !profileIds.has(t.profile.id));
+    setTabs(next);
+    if (!next.some((t) => t.id === activeTab)) setActiveTab(next[Math.min(index, next.length - 1)]?.id ?? null);
+    setTabStates((s) => Object.fromEntries(Object.entries(s).filter(([id]) => next.some((t) => t.id === id))));
+    setImmersive(false);
+  };
+
+  /** 연결을 삭제하고, 그 연결로 열린 세션을 끊습니다. 일부가 실패하면 나머지는 지우고 알립니다. */
+  const removeProfiles = async (targets: Profile[]) => {
+    const removed = new Set<string>();
+    const failed: string[] = [];
+    for (const p of targets) {
+      try {
+        await api.deleteProfile(p.id);
+        removed.add(p.id);
+      } catch (e) {
+        failed.push(`${p.name} (${errorMessage(e)})`);
+      }
+    }
+    closeTabsOf(removed);
     loadProfiles();
-    showToast(`“${profile.name}” 연결을 삭제했습니다.`);
+    if (failed.length > 0) showToast(`삭제하지 못한 연결: ${failed.join(", ")}`);
+    else if (targets.length === 1 && targets[0]) showToast(`“${targets[0].name}” 연결을 삭제했습니다.`);
+    else showToast(`연결 ${removed.size}개를 삭제했습니다.`);
+  };
+
+  const deleteProfile = async (profile: Profile) => {
+    await removeProfiles([profile]);
+    setProfileDialog(null);
   };
 
   // macOS ⌘W (menu.rs): 열린 대화상자 → 활성 탭(연결 종료) → 창 순서로 닫음
@@ -131,6 +159,7 @@ export default function App() {
     return () => void unlisten.then((f) => f());
   }, []);
 
+  const openIds = useMemo(() => new Set(tabs.map((t) => t.profile.id)), [tabs]);
   const activeProfileId = tabs.find((t) => t.id === activeTab)?.profile.id ?? null;
   const activeState = activeTab ? (tabStates[activeTab] ?? null) : null;
 
@@ -178,6 +207,8 @@ export default function App() {
           onOpen={openProfile}
           onEdit={(profile) => setProfileDialog({ profile })}
           onImport={() => setImporting(true)}
+          openIds={openIds}
+          onDeleteMany={removeProfiles}
         />
         <main className="main">
           {tabs.length > 0 && (
