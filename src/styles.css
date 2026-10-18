@@ -1686,7 +1686,11 @@ textarea {
 .sidebar-footer {
   margin-top: auto;
   padding: 12px 8px 0;
-  font-size: 12.5px;
+}
+
+.sidebar-import {
+  width: 100%;
+  justify-content: center;
 }
 
 .import-list {

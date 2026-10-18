@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Profile } from "../lib/api.ts";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
-import { EditIcon, StarIcon } from "../components/Icons.tsx";
+import { CheckIcon, DownloadIcon, EditIcon, StarIcon } from "../components/Icons.tsx";
 import { ProtocolBadge } from "./ProtocolBadge.tsx";
 
 interface SidebarProps {
@@ -126,7 +126,8 @@ export function Sidebar({
             </button>
           </>
         ) : (
-          <button type="button" className="link-button sidebar-select" onClick={() => setSelecting(true)}>
+          <button type="button" className="button button-secondary button-small" onClick={() => setSelecting(true)}>
+            <CheckIcon />
             선택
           </button>
         )}
@@ -240,7 +241,8 @@ export function Sidebar({
 function ImportButton({ onImport }: { onImport: () => void }) {
   return (
     <div className="sidebar-footer">
-      <button type="button" className="link-button" onClick={onImport}>
+      <button type="button" className="button button-secondary button-small sidebar-import" onClick={onImport}>
+        <DownloadIcon />
         ~/.ssh/config 가져오기
       </button>
     </div>
