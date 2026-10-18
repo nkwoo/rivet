@@ -90,6 +90,7 @@ mod tests {
                 notes: String::new(),
                 favorite: false,
                 rdp: None,
+                jump_profile_id: None,
             })
             .unwrap();
         secrets.set(&p.id, &SecretString::from("pw")).unwrap();

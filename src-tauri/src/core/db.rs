@@ -57,6 +57,10 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE profiles ADD COLUMN rdp_settings TEXT;
     "#,
+    // v4: 점프 호스트 (다른 SSH 프로필 ID)
+    r#"
+    ALTER TABLE profiles ADD COLUMN jump_profile_id TEXT;
+    "#,
 ];
 
 /// 앱 전체가 공유하는 SQLite 연결.

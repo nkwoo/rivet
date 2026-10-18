@@ -39,7 +39,7 @@ use crate::protocols::rdp::{
 use crate::protocols::sftp::SftpFs;
 use crate::protocols::ssh::{
     load_private_key, ConnectionInfo, HostKeyVerdict, HostKeyVerifier, ShellCommand, SshAuth,
-    SshConnection, SshTarget,
+    SshConnection, SshError, SshTarget,
 };
 use crate::protocols::tls::CertTrust;
 use crate::protocols::{RemoteFs, RemoteSession};
@@ -99,6 +99,11 @@ pub enum SessionEvent {
         #[serde(flatten)]
         info: ConnectionInfo,
     },
+    /// 점프 호스트 인증 실패: UI가 해당 점프 호스트의 비밀번호를 다시 받음
+    JumpAuthFailed {
+        profile_id: String,
+        name: String,
+    },
     /// RDP 텍스트 클립보드를 주고받음 (`toRemote` / `toLocal`)
     Clipboard {
         direction: String,
@@ -124,8 +129,19 @@ pub trait SessionSink: Send + Sync + 'static {
     }
 }
 
+/// 점프 호스트 한 단계
+pub struct JumpHop {
+    pub profile_id: String,
+    pub name: String,
+    pub target: SshTarget,
+    pub auth: SshAuth,
+    pub on_authenticated: Option<Box<dyn FnOnce() + Send>>,
+}
+
 /// SSH 세션 시작 요청
 pub struct SshSessionRequest {
+    /// 거쳐 갈 점프 호스트 (접속 순서). 비어 있으면 직접 연결
+    pub jumps: Vec<JumpHop>,
     pub target: SshTarget,
     pub auth: SshAuth,
     /// 셸을 열 때의 터미널 크기. `None`이면 셸 없이 연결만 유지합니다(SFTP 프로필).
@@ -134,24 +150,37 @@ pub struct SshSessionRequest {
     pub on_authenticated: Option<Box<dyn FnOnce() + Send>>,
 }
 
-/// 프로필과 저장된/입력받은 비밀 값으로 SSH 세션 요청을 만듭니다.
-///
-/// 비밀 값이 필요한데 없으면 `PasswordRequired`/`PassphraseRequired`를 돌려주어
-/// UI가 입력을 받아 다시 호출하게 합니다. `save_secret`이 참이면 인증 성공 후에만 저장합니다.
-pub fn prepare_ssh_request(
+/// 인증 성공 후에 한 번 호출하는 콜백 (새로 입력받은 비밀 값 저장)
+type OnAuthenticated = Option<Box<dyn FnOnce() + Send>>;
+
+/// 비밀 값 저장 콜백 (인증 성공 후에만 호출)
+fn save_after_auth(
+    profile: &Profile,
+    secret: Option<SecretString>,
+    from_user: bool,
+    save: bool,
+    secrets: &Arc<dyn SecretStore>,
+) -> OnAuthenticated {
+    match secret {
+        Some(secret) if from_user && save => {
+            let (id, secrets) = (profile.id.clone(), secrets.clone());
+            Some(Box::new(move || {
+                if let Err(e) = secrets.set(&id, &secret) {
+                    tracing::warn!(error = %e, "could not save secret to keychain");
+                }
+            }))
+        }
+        _ => None,
+    }
+}
+
+/// 프로필의 인증 수단을 만듭니다. 비밀 값이 필요한데 없으면 `PasswordRequired`/`PassphraseRequired`.
+fn ssh_auth(
     profile: &Profile,
     provided_secret: Option<SecretString>,
     save_secret: bool,
-    secrets: Arc<dyn SecretStore>,
-    cols: u32,
-    rows: u32,
-) -> Result<SshSessionRequest> {
-    let pty = match profile.protocol {
-        Protocol::Ssh => Some(check_terminal_size(cols, rows)?),
-        Protocol::Sftp => None,
-        _ => return Err(Error::Invalid("profile is not an SSH/SFTP profile".into())),
-    };
-
+    secrets: &Arc<dyn SecretStore>,
+) -> Result<(SshAuth, OnAuthenticated)> {
     let from_user = provided_secret.is_some();
     let secret = match provided_secret {
         Some(s) => Some(s),
@@ -173,25 +202,74 @@ pub fn prepare_ssh_request(
         }
         AuthMethod::Agent => SshAuth::Agent,
     };
+    Ok((
+        auth,
+        save_after_auth(profile, secret, from_user, save_secret, secrets),
+    ))
+}
 
-    let on_authenticated: Option<Box<dyn FnOnce() + Send>> = match secret {
-        Some(secret) if from_user && save_secret => {
-            let id = profile.id.clone();
-            Some(Box::new(move || {
-                if let Err(e) = secrets.set(&id, &secret) {
-                    tracing::warn!(error = %e, "could not save secret to keychain");
-                }
-            }))
-        }
-        _ => None,
+fn ssh_target(profile: &Profile) -> SshTarget {
+    SshTarget {
+        host: profile.host.clone(),
+        port: profile.port,
+        username: profile.username.clone(),
+    }
+}
+
+/// 점프 호스트에 쓸 비밀 값 (점프 프로필 ID → 사용자가 방금 입력한 값)
+#[derive(Default)]
+pub struct JumpSecrets {
+    pub provided: HashMap<String, SecretString>,
+    pub save: bool,
+}
+
+/// 프로필과 저장된/입력받은 비밀 값으로 SSH 세션 요청을 만듭니다.
+///
+/// 비밀 값이 필요한데 없으면 `PasswordRequired`/`PassphraseRequired`를 돌려주어
+/// UI가 입력을 받아 다시 호출하게 합니다. 점프 호스트의 비밀 값이 없으면 `JumpSecretRequired`.
+/// `save_secret`이 참이면 인증 성공 후에만 저장합니다.
+#[allow(clippy::too_many_arguments)]
+pub fn prepare_ssh_request(
+    profile: &Profile,
+    jumps: &[Profile],
+    provided_secret: Option<SecretString>,
+    save_secret: bool,
+    mut jump_secrets: JumpSecrets,
+    secrets: Arc<dyn SecretStore>,
+    cols: u32,
+    rows: u32,
+) -> Result<SshSessionRequest> {
+    let pty = match profile.protocol {
+        Protocol::Ssh => Some(check_terminal_size(cols, rows)?),
+        Protocol::Sftp => None,
+        _ => return Err(Error::Invalid("profile is not an SSH/SFTP profile".into())),
     };
 
+    let mut hops = Vec::with_capacity(jumps.len());
+    for jump in jumps {
+        let provided = jump_secrets.provided.remove(&jump.id);
+        let (auth, on_authenticated) = ssh_auth(jump, provided, jump_secrets.save, &secrets)
+            .map_err(|e| match e.code() {
+                "passwordRequired" | "passphraseRequired" => Error::JumpSecretRequired {
+                    profile_id: jump.id.clone(),
+                    name: jump.name.clone(),
+                    passphrase: e.code() == "passphraseRequired",
+                },
+                _ => e,
+            })?;
+        hops.push(JumpHop {
+            profile_id: jump.id.clone(),
+            name: jump.name.clone(),
+            target: ssh_target(jump),
+            auth,
+            on_authenticated,
+        });
+    }
+
+    let (auth, on_authenticated) = ssh_auth(profile, provided_secret, save_secret, &secrets)?;
     Ok(SshSessionRequest {
-        target: SshTarget {
-            host: profile.host.clone(),
-            port: profile.port,
-            username: profile.username.clone(),
-        },
+        jumps: hops,
+        target: ssh_target(profile),
         auth,
         pty,
         on_authenticated,
@@ -334,6 +412,7 @@ fn rdp_connection_info(info: &RdpConnectionInfo) -> ConnectionInfo {
         cipher: String::new(),
         host_key_algorithm: "X.509".into(),
         fingerprint: info.fingerprint.clone(),
+        via: Vec::new(),
     }
 }
 
@@ -367,6 +446,7 @@ fn ftp_connection_info(info: &FtpConnectionInfo) -> ConnectionInfo {
             String::new()
         },
         fingerprint: info.fingerprint.clone().unwrap_or_default(),
+        via: Vec::new(),
     }
 }
 
@@ -655,6 +735,7 @@ async fn run_ssh_session(
     store_connection: impl FnOnce(Arc<SshConnection>) -> bool,
 ) {
     let SshSessionRequest {
+        jumps,
         target,
         auth,
         pty,
@@ -662,10 +743,51 @@ async fn run_ssh_session(
     } = request;
 
     let result = async {
-        let conn = SshConnection::connect(&target, &auth, verifier).await;
+        // 점프 호스트를 차례로 연결합니다. 각 단계의 호스트 키도 똑같이 검증합니다.
+        let mut via: Option<Arc<SshConnection>> = None;
+        let mut via_names = Vec::new();
+        for hop in jumps {
+            let JumpHop {
+                profile_id,
+                name,
+                target: hop_target,
+                auth: hop_auth,
+                on_authenticated: hop_saved,
+            } = hop;
+            let conn = match via.take() {
+                None => SshConnection::connect(&hop_target, &hop_auth, verifier.clone()).await,
+                Some(prev) => SshConnection::connect_via(prev, &hop_target, &hop_auth, verifier.clone()).await,
+            };
+            drop(hop_auth);
+            let conn = conn.map_err(|source| {
+                if matches!(source, SshError::AuthFailed) {
+                    sink.event(SessionEvent::JumpAuthFailed {
+                        profile_id: profile_id.clone(),
+                        name: name.clone(),
+                    });
+                }
+                Error::Jump {
+                    name: name.clone(),
+                    source,
+                }
+            })?;
+            tracing::info!(host = %hop_target.host, port = hop_target.port, "ssh jump host authenticated");
+            if let Some(callback) = hop_saved {
+                callback();
+            }
+            via_names.push(name);
+            via = Some(Arc::new(conn));
+        }
+
+        let conn = match via {
+            None => SshConnection::connect(&target, &auth, verifier).await,
+            Some(jump) => SshConnection::connect_via(jump, &target, &auth, verifier).await,
+        };
         // 인증이 끝나면 비밀 값을 메모리에서 바로 지웁니다.
         drop(auth);
-        let conn = Arc::new(conn?);
+        let mut conn = conn?;
+        conn.set_via_names(via_names);
+        let conn = Arc::new(conn);
         tracing::info!(host = %target.host, port = target.port, "ssh authenticated");
         if let Some(callback) = on_authenticated {
             callback();
@@ -1088,6 +1210,27 @@ mod tests {
     use crate::core::secrets::MemoryStore;
     use secrecy::ExposeSecret;
 
+    /// 점프 호스트 없는 요청
+    fn prep(
+        p: &Profile,
+        secret: Option<SecretString>,
+        save: bool,
+        secrets: Arc<dyn SecretStore>,
+        cols: u32,
+        rows: u32,
+    ) -> Result<SshSessionRequest> {
+        prepare_ssh_request(
+            p,
+            &[],
+            secret,
+            save,
+            JumpSecrets::default(),
+            secrets,
+            cols,
+            rows,
+        )
+    }
+
     fn profile(auth: AuthMethod) -> Profile {
         Profile {
             id: "p1".into(),
@@ -1103,6 +1246,7 @@ mod tests {
             notes: String::new(),
             favorite: false,
             rdp: None,
+            jump_profile_id: None,
             created_at: 0,
             updated_at: 0,
         }
@@ -1111,7 +1255,7 @@ mod tests {
     #[test]
     fn password_profile_without_secret_requires_password() {
         let secrets: Arc<dyn SecretStore> = Arc::new(MemoryStore::default());
-        let err = prepare_ssh_request(&profile(AuthMethod::Password), None, false, secrets, 80, 24)
+        let err = prep(&profile(AuthMethod::Password), None, false, secrets, 80, 24)
             .err()
             .unwrap();
         assert!(matches!(err, Error::PasswordRequired));
@@ -1121,8 +1265,7 @@ mod tests {
     fn stored_password_is_used_and_not_resaved() {
         let store = Arc::new(MemoryStore::default());
         store.set("p1", &SecretString::from("stored")).unwrap();
-        let req =
-            prepare_ssh_request(&profile(AuthMethod::Password), None, true, store, 80, 24).unwrap();
+        let req = prep(&profile(AuthMethod::Password), None, true, store, 80, 24).unwrap();
         match req.auth {
             SshAuth::Password(p) => assert_eq!(p.expose_secret(), "stored"),
             other => panic!("unexpected {other:?}"),
@@ -1133,7 +1276,7 @@ mod tests {
     #[test]
     fn provided_password_is_saved_only_after_authentication() {
         let store = Arc::new(MemoryStore::default());
-        let req = prepare_ssh_request(
+        let req = prep(
             &profile(AuthMethod::Password),
             Some(SecretString::from("typed")),
             true,
@@ -1150,7 +1293,7 @@ mod tests {
     #[test]
     fn provided_password_is_not_saved_when_not_requested() {
         let store = Arc::new(MemoryStore::default());
-        let req = prepare_ssh_request(
+        let req = prep(
             &profile(AuthMethod::Password),
             Some(SecretString::from("typed")),
             false,
@@ -1173,9 +1316,7 @@ mod tests {
             .into(),
         );
         let secrets: Arc<dyn SecretStore> = Arc::new(MemoryStore::default());
-        let err = prepare_ssh_request(&p, None, false, secrets, 80, 24)
-            .err()
-            .unwrap();
+        let err = prep(&p, None, false, secrets, 80, 24).err().unwrap();
         assert_eq!(err.code(), "passphraseRequired");
     }
 
@@ -1183,14 +1324,73 @@ mod tests {
     fn rejects_non_ssh_profiles_and_bad_sizes() {
         let secrets: Arc<dyn SecretStore> = Arc::new(MemoryStore::default());
         let mut p = profile(AuthMethod::Agent);
-        assert!(prepare_ssh_request(&p, None, false, secrets.clone(), 0, 24).is_err());
-        assert!(prepare_ssh_request(&p, None, false, secrets.clone(), 80, 5000).is_err());
+        assert!(prep(&p, None, false, secrets.clone(), 0, 24).is_err());
+        assert!(prep(&p, None, false, secrets.clone(), 80, 5000).is_err());
         p.protocol = Protocol::Rdp;
-        assert!(prepare_ssh_request(&p, None, false, secrets.clone(), 80, 24).is_err());
+        assert!(prep(&p, None, false, secrets.clone(), 80, 24).is_err());
         // SFTP 프로필은 셸이 없어 터미널 크기를 보지 않음
         p.protocol = Protocol::Sftp;
-        let req = prepare_ssh_request(&p, None, false, secrets, 0, 0).unwrap();
+        let req = prep(&p, None, false, secrets, 0, 0).unwrap();
         assert!(req.pty.is_none());
+    }
+
+    #[test]
+    fn jump_hosts_get_their_own_secrets_and_report_missing_ones() {
+        let store = Arc::new(MemoryStore::default());
+        let mut jump = profile(AuthMethod::Password);
+        jump.id = "jump".into();
+        jump.name = "bastion".into();
+        let target = profile(AuthMethod::Agent);
+        let secrets: Arc<dyn SecretStore> = store.clone();
+
+        // 점프 호스트 비밀번호가 없으면 어느 프로필인지 알려 줌
+        let err = prepare_ssh_request(
+            &target,
+            &[jump.clone()],
+            None,
+            false,
+            JumpSecrets::default(),
+            secrets.clone(),
+            80,
+            24,
+        )
+        .err()
+        .unwrap();
+        assert!(
+            matches!(&err, Error::JumpSecretRequired { profile_id, name, passphrase: false } if profile_id == "jump" && name == "bastion")
+        );
+        assert_eq!(err.code(), "jumpPasswordRequired");
+
+        // 입력받은 값으로 요청을 만들고, 인증 후에만 저장
+        let mut provided = HashMap::new();
+        provided.insert("jump".to_owned(), SecretString::from("jump-pw"));
+        let req = prepare_ssh_request(
+            &target,
+            &[jump],
+            None,
+            false,
+            JumpSecrets {
+                provided,
+                save: true,
+            },
+            secrets,
+            80,
+            24,
+        )
+        .unwrap();
+        assert_eq!(req.jumps.len(), 1);
+        assert!(
+            matches!(&req.jumps[0].auth, SshAuth::Password(p) if p.expose_secret() == "jump-pw")
+        );
+        assert!(store.get("jump").unwrap().is_none());
+        let JumpHop {
+            on_authenticated, ..
+        } = req.jumps.into_iter().next().unwrap();
+        (on_authenticated.unwrap())();
+        assert_eq!(
+            store.get("jump").unwrap().unwrap().expose_secret(),
+            "jump-pw"
+        );
     }
 
     #[test]

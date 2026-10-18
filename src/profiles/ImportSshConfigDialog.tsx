@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Dialog } from "../components/Dialog.tsx";
 import { TerminalIcon } from "../components/Icons.tsx";
-import { api, errorMessage, type Profile, type SshConfigHost } from "../lib/api.ts";
+import { api, errorMessage, type Profile, type ProfileInput, type SshConfigHost } from "../lib/api.ts";
 
 interface ImportSshConfigDialogProps {
   profiles: Profile[];
@@ -61,34 +61,58 @@ export function ImportSshConfigDialog({ profiles, onImported, onClose }: ImportS
     setBusy(true);
     setError(null);
     const failed: string[] = [];
-    let count = 0;
-    for (const h of hosts.filter((x) => selected.has(x.alias))) {
+    const chosen = hosts.filter((x) => selected.has(x.alias));
+    const created = new Map<string, { profile: Profile; input: ProfileInput }>();
+    for (const h of chosen) {
+      const input: ProfileInput = {
+        name: h.alias.slice(0, 100),
+        protocol: "ssh",
+        host: h.host,
+        port: h.port,
+        username: h.user,
+        authMethod: h.identityFile ? "key" : "agent",
+        keyPath: h.identityFile,
+        group: group.trim() || null,
+        tags: [],
+        notes: "",
+        favorite: false,
+        rdp: null,
+        jumpProfileId: null,
+      };
       try {
-        await api.createProfile({
-          name: h.alias.slice(0, 100),
-          protocol: "ssh",
-          host: h.host,
-          port: h.port,
-          username: h.user,
-          authMethod: h.identityFile ? "key" : "agent",
-          keyPath: h.identityFile,
-          group: group.trim() || null,
-          tags: [],
-          notes: h.proxyJump ? `ProxyJump ${h.proxyJump}` : "",
-          favorite: false,
-          rdp: null,
-        });
-        count++;
+        created.set(h.alias.toLowerCase(), { profile: await api.createProfile(input), input });
       } catch (e) {
         failed.push(`${h.alias}: ${errorMessage(e)}`);
       }
     }
+
+    // ProxyJump: 같은 이름(별칭)의 SSH 연결을 점프 호스트로 연결 (이번에 가져온 것 또는 기존 연결)
+    const findJump = (alias: string): Profile | undefined =>
+      created.get(alias.toLowerCase())?.profile ??
+      profiles.find(
+        (p) => (p.protocol === "ssh" || p.protocol === "sftp") && p.name.toLowerCase() === alias.toLowerCase(),
+      );
+    for (const h of chosen) {
+      const entry = created.get(h.alias.toLowerCase());
+      if (!h.proxyJump || !entry) continue;
+      const jump = h.proxyJump.includes(",") ? undefined : findJump(h.proxyJump.trim());
+      if (!jump || jump.id === entry.profile.id) {
+        failed.push(`${h.alias}: 점프 호스트 “${h.proxyJump}”를 찾지 못해 직접 연결로 만들었습니다.`);
+        continue;
+      }
+      try {
+        await api.updateProfile(entry.profile.id, { ...entry.input, jumpProfileId: jump.id });
+      } catch (e) {
+        failed.push(`${h.alias}: 점프 호스트를 설정하지 못했습니다 (${errorMessage(e)}).`);
+      }
+    }
+
     setBusy(false);
     if (failed.length === 0) {
-      onImported(count);
+      onImported(created.size);
     } else {
       setFailures(failed);
-      if (count > 0) onImported(count);
+      if (created.size > 0) onImported(created.size);
     }
   };
 
@@ -129,8 +153,9 @@ export function ImportSshConfigDialog({ profiles, onImported, onClose }: ImportS
       {hosts && hosts.length > 0 && (
         <>
           <p className="dialog-text muted">
-            키 파일(IdentityFile)이 있으면 개인 키, 없으면 ssh-agent 인증으로 만듭니다. 비밀번호와 패스프레이즈는
-            가져오지 않습니다. 같은 호스트·포트·사용자의 연결이 이미 있으면 선택하지 않습니다.
+            키 파일(IdentityFile)이 있으면 개인 키, 없으면 ssh-agent 인증으로 만듭니다. ProxyJump는 같은 이름의 연결을
+            점프 호스트로 설정합니다. 비밀번호와 패스프레이즈는 가져오지 않습니다. 같은 호스트·포트·사용자의 연결이 이미
+            있으면 선택하지 않습니다.
           </p>
           <label className="field">
             <span className="label">그룹</span>
@@ -185,7 +210,7 @@ export function ImportSshConfigDialog({ profiles, onImported, onClose }: ImportS
       )}
       {failures.length > 0 && (
         <div role="alert" className="form-error">
-          일부 호스트를 가져오지 못했습니다.
+          확인이 필요한 항목이 있습니다.
           <ul>
             {failures.map((f) => (
               <li key={f} className="mono">

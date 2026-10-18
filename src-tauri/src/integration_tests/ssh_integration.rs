@@ -15,7 +15,9 @@ use crate::core::db::Database;
 use crate::core::known_hosts::KnownHostsStore;
 use crate::core::profile::{AuthMethod, Profile, Protocol};
 use crate::core::secrets::{MemoryStore, SecretStore};
-use crate::core::session::{prepare_ssh_request, SessionEvent, SessionManager, SessionSink};
+use crate::core::session::{
+    prepare_ssh_request, JumpSecrets, SessionEvent, SessionManager, SessionSink,
+};
 use crate::protocols::ssh::ShellCommand;
 
 const PASSWORD: &str = "rivet-it-password";
@@ -43,6 +45,7 @@ fn profile(auth: AuthMethod) -> Profile {
         notes: String::new(),
         favorite: false,
         rdp: None,
+        jump_profile_id: None,
         created_at: 0,
         updated_at: 0,
     }
@@ -82,12 +85,53 @@ impl Harness {
         }
     }
 
+    /// 점프 호스트를 거쳐 접속합니다. `jump_secret`은 점프 호스트에 입력한 비밀번호입니다.
+    fn connect_via(
+        &self,
+        jump: &Profile,
+        target: &Profile,
+        jump_secret: Option<&str>,
+        secret: &str,
+    ) -> Session {
+        let secrets: Arc<dyn SecretStore> = self.secrets.clone();
+        let mut provided = std::collections::HashMap::new();
+        if let Some(js) = jump_secret {
+            provided.insert(jump.id.clone(), SecretString::from(js));
+        }
+        let request = prepare_ssh_request(
+            target,
+            std::slice::from_ref(jump),
+            Some(SecretString::from(secret)),
+            false,
+            JumpSecrets {
+                provided,
+                save: false,
+            },
+            secrets,
+            80,
+            24,
+        )
+        .unwrap();
+        let (tx, rx) = mpsc::unbounded_channel();
+        let id = self
+            .manager
+            .spawn_ssh(request, self.known_hosts.clone(), Arc::new(TestSink(tx)));
+        Session {
+            id,
+            rx,
+            output: Vec::new(),
+            manager: self.manager.clone(),
+        }
+    }
+
     fn connect(&self, profile: &Profile, secret: Option<&str>, save: bool) -> (String, Session) {
         let secrets: Arc<dyn SecretStore> = self.secrets.clone();
         let request = prepare_ssh_request(
             profile,
+            &[],
             secret.map(SecretString::from),
             save,
+            JumpSecrets::default(),
             secrets,
             80,
             24,
@@ -414,3 +458,83 @@ async fn ssh_integration_password_never_appears_in_trace_logs() {
 }
 
 mod sftp;
+
+/// 컨테이너 자신을 점프 호스트로 쓰고, 컨테이너 안에서 본 127.0.0.1:22를 대상으로 접속
+fn jump_and_inner_target() -> (Profile, Profile) {
+    let mut jump = profile(AuthMethod::Password);
+    jump.name = "bastion".into();
+    let mut target = profile(AuthMethod::Password);
+    target.name = "inner".into();
+    target.port = 22;
+    target.jump_profile_id = Some(jump.id.clone());
+    (jump, target)
+}
+
+#[tokio::test]
+#[ignore = "needs Docker OpenSSH: tests/docker/run-ssh-it.sh"]
+async fn ssh_integration_jump_host_tunnels_to_target() {
+    let h = Harness::new();
+    let (jump, target) = jump_and_inner_target();
+    let mut s = h.connect_via(&jump, &target, Some(PASSWORD), PASSWORD);
+
+    // 점프 호스트와 대상 각각의 호스트 키를 확인 (known_hosts 항목이 따로 생김)
+    let SessionEvent::HostKeyPrompt { port: first, .. } = s
+        .event(|e| matches!(e, SessionEvent::HostKeyPrompt { .. }))
+        .await
+    else {
+        unreachable!()
+    };
+    assert_eq!(first, port());
+    h.manager.respond_host_key(&s.id, true).unwrap();
+    let SessionEvent::HostKeyPrompt { port: second, .. } = s
+        .event(|e| matches!(e, SessionEvent::HostKeyPrompt { .. }))
+        .await
+    else {
+        unreachable!()
+    };
+    assert_eq!(second, 22);
+    h.manager.respond_host_key(&s.id, true).unwrap();
+    match s.connected().await {
+        SessionEvent::Connected { info } => assert_eq!(info.via, vec!["bastion".to_string()]),
+        _ => unreachable!(),
+    }
+    assert_eq!(h.known_hosts.list().unwrap().len(), 2);
+
+    // 대상 셸은 컨테이너 안의 22번 포트로 들어온 연결 (SSH_CONNECTION: 클라이언트 IP, 포트, 서버 IP, 서버 포트)
+    s.type_line("echo via-$(echo $SSH_CONNECTION | cut -d' ' -f4)")
+        .await;
+    s.output_contains("via-22").await;
+
+    // 같은 연결 위에서 SFTP도 동작
+    let fs = h.manager.remote_fs(&s.id).await.unwrap();
+    assert!(fs.list("/home/rivet").await.is_ok());
+
+    s.type_line("exit").await;
+    s.closed().await;
+}
+
+#[tokio::test]
+#[ignore = "needs Docker OpenSSH: tests/docker/run-ssh-it.sh"]
+async fn ssh_integration_jump_host_auth_failure_is_reported_for_the_jump() {
+    let h = Harness::new();
+    let (jump, target) = jump_and_inner_target();
+    let mut s = h.connect_via(&jump, &target, Some("wrong"), PASSWORD);
+    let failed = tokio::time::timeout(WAIT, async {
+        loop {
+            match s.rx.recv().await.expect("session ended") {
+                Item::Event(SessionEvent::HostKeyPrompt { .. }) => {
+                    h.manager.respond_host_key(&s.id, true).unwrap()
+                }
+                Item::Event(SessionEvent::JumpAuthFailed { profile_id, name }) => {
+                    return (profile_id, name)
+                }
+                Item::Event(SessionEvent::Connected { .. }) => panic!("unexpectedly connected"),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(failed, (jump.id.clone(), "bastion".to_string()));
+    assert_eq!(s.error_code().await, "jumpAuthFailed");
+}

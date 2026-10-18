@@ -260,6 +260,7 @@ export default function App() {
         <ProfileDialog
           profile={profileDialog.profile}
           groups={groups}
+          profiles={profiles}
           onSave={saveProfile}
           onDelete={deleteProfile}
           onForgetSecret={(p) => api.forgetSecret(p.id)}

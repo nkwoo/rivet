@@ -4,7 +4,7 @@ use tauri::State;
 
 use super::CmdResult;
 use crate::core::session::{
-    check_terminal_size, prepare_ssh_request, SessionEvent, SessionId, SessionSink,
+    check_terminal_size, prepare_ssh_request, JumpSecrets, SessionEvent, SessionId, SessionSink,
 };
 use crate::core::AppState;
 use crate::error::Error;
@@ -32,6 +32,7 @@ impl SessionSink for ChannelSink {
 /// 프로필로 SSH 세션을 시작하고 세션 ID를 돌려줍니다. 연결 진행 상황은 `events`로 전달됩니다.
 ///
 /// `secret`은 사용자가 방금 입력한 비밀번호/패스프레이즈입니다. 없으면 keyring에서 찾습니다.
+/// `jump_secrets`는 점프 호스트 프로필 ID별로 방금 입력한 비밀 값입니다.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn ssh_connect(
@@ -41,15 +42,35 @@ pub async fn ssh_connect(
     rows: u32,
     secret: Option<String>,
     save_secret: bool,
+    jump_secrets: Option<std::collections::HashMap<String, String>>,
+    save_jump_secrets: Option<bool>,
     events: Channel<SessionEvent>,
     output: Channel<InvokeResponseBody>,
 ) -> CmdResult<SessionId> {
     let profile = state.profiles.get(&profile_id)?;
+    let jumps = state.profiles.jump_chain(&profile)?;
     let secrets = state.secrets.clone();
     let secret = secret.map(SecretString::from);
+    let jump_secrets = JumpSecrets {
+        provided: jump_secrets
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(id, s)| (id, SecretString::from(s)))
+            .collect(),
+        save: save_jump_secrets.unwrap_or(false),
+    };
     // keyring 조회와 키 파일 복호화는 블로킹 작업입니다.
     let request = tauri::async_runtime::spawn_blocking(move || {
-        prepare_ssh_request(&profile, secret, save_secret, secrets, cols, rows)
+        prepare_ssh_request(
+            &profile,
+            &jumps,
+            secret,
+            save_secret,
+            jump_secrets,
+            secrets,
+            cols,
+            rows,
+        )
     })
     .await
     .map_err(|e| Error::Invalid(e.to_string()))??;

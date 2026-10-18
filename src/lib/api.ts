@@ -35,6 +35,8 @@ export interface Profile {
   notes: string;
   favorite: boolean;
   rdp: RdpSettings | null;
+  /** 점프 호스트로 쓸 SSH 프로필 ID */
+  jumpProfileId: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -52,6 +54,7 @@ export interface ProfileInput {
   notes: string;
   favorite: boolean;
   rdp: RdpSettings | null;
+  jumpProfileId: string | null;
 }
 
 /** `~/.ssh/config`의 가져오기 후보 */
@@ -88,6 +91,8 @@ export interface ConnectionInfo {
   cipher: string;
   hostKeyAlgorithm: string;
   fingerprint: string;
+  /** 거쳐 온 점프 호스트 이름 (접속 순서) */
+  via?: string[];
 }
 
 export type SessionEvent =
@@ -104,6 +109,7 @@ export type SessionEvent =
   | { type: "certChanged"; host: string; port: number; expectedFingerprint: string; actualFingerprint: string }
   | ({ type: "connected" } & ConnectionInfo)
   | { type: "clipboard"; direction: "toRemote" | "toLocal"; chars: number }
+  | { type: "jumpAuthFailed"; profileId: string; name: string }
   | { type: "closed"; exitStatus: number | null }
   | { type: "error"; code: string; message: string };
 
@@ -171,6 +177,8 @@ export type TransferEvent =
 export interface ApiError {
   code: string;
   message: string;
+  /** 에러가 가리키는 다른 프로필 (점프 호스트 비밀번호 요청 등) */
+  profileId?: string;
 }
 
 export function isApiError(e: unknown): e is ApiError {
@@ -212,6 +220,9 @@ export const api = {
     rows: number;
     secret: string | null;
     saveSecret: boolean;
+    /** 점프 호스트 프로필 ID별로 방금 입력한 비밀 값 */
+    jumpSecrets: Record<string, string> | null;
+    saveJumpSecrets: boolean;
     events: Channel<SessionEvent>;
     output: Channel<ArrayBuffer>;
   }) => invoke<string>("ssh_connect", args),

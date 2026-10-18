@@ -20,6 +20,7 @@ export type TabState =
 type Overlay =
   | { kind: "none" }
   | { kind: "secret"; mode: "password" | "passphrase"; error?: string }
+  | { kind: "jumpSecret"; profileId: string; name: string; mode: "password" | "passphrase"; error?: string }
   | { kind: "hostKeyPrompt"; event: Extract<SessionEvent, { type: "hostKeyPrompt" }> }
   | { kind: "hostKeyChanged"; event: Extract<SessionEvent, { type: "hostKeyChanged" }> }
   | { kind: "certPrompt"; event: Extract<SessionEvent, { type: "certPrompt" }> }
@@ -71,6 +72,7 @@ const SESSION_ERROR_TEXT: Record<string, string> = {
   connect: "서버에 연결할 수 없습니다",
   timeout: "연결 시간이 초과되었습니다",
   authFailed: "인증에 실패했습니다",
+  jumpAuthFailed: "점프 호스트 인증에 실패했습니다",
   hostKeyChanged: "호스트 키가 바뀌어 연결을 차단했습니다",
   hostKeyRejected: "호스트 키를 승인하지 않아 연결을 취소했습니다",
   certChanged: "인증서가 바뀌어 연결을 차단했습니다",
@@ -106,6 +108,14 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts }: Te
   const writing = useRef(false);
   /** `connected` 이벤트가 `ssh_connect` 응답보다 먼저 올 수 있어 따로 기록 */
   const connectedSeen = useRef(false);
+  /**
+   * 이번 접속 시도에서 입력받은 비밀 값. 점프 호스트 비밀번호를 차례로 묻는 동안 유지하고,
+   * 연결되면 바로 지웁니다 (백엔드가 키체인 저장 여부를 처리).
+   */
+  const pendingTarget = useRef<{ secret: string; save: boolean } | null>(null);
+  const jumpSecrets = useRef<Record<string, string>>({});
+  const saveJumpSecrets = useRef(false);
+  const jumpFailure = useRef<{ profileId: string; name: string } | null>(null);
   const onStateRef = useRef(onState);
   onStateRef.current = onState;
 
@@ -154,9 +164,15 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts }: Te
         case "certChanged":
           setOverlay({ kind: "certChanged", event });
           break;
+        case "jumpAuthFailed":
+          jumpFailure.current = { profileId: event.profileId, name: event.name };
+          delete jumpSecrets.current[event.profileId];
+          break;
         case "connected": {
           const { type: _t, ...info } = event;
           lastError.current = null;
+          pendingTarget.current = null;
+          jumpSecrets.current = {};
           setOverlay({ kind: "none" });
           connectedSeen.current = true;
           if (session.current) setSessionId(session.current);
@@ -174,7 +190,20 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts }: Te
           setSessionId(null);
           setEnded(true);
           const err = lastError.current;
-          if (err?.code === "authFailed" && profile.authMethod === "password") {
+          const jumpFail = jumpFailure.current;
+          jumpFailure.current = null;
+          if (err?.code === "jumpAuthFailed" && jumpFail) {
+            // 점프 호스트 비밀번호가 틀림: 그 점프 호스트의 비밀번호만 다시 받음
+            setOverlay({
+              kind: "jumpSecret",
+              profileId: jumpFail.profileId,
+              name: jumpFail.name,
+              mode: "password",
+              error: "인증에 실패했습니다. 비밀번호를 확인하세요.",
+            });
+            report({ kind: "error", message: "점프 호스트 인증 실패" });
+          } else if (err?.code === "authFailed" && profile.authMethod === "password") {
+            pendingTarget.current = null;
             // 저장된/입력한 비밀번호가 틀림: 다시 입력받음
             setOverlay({ kind: "secret", mode: "password", error: "인증에 실패했습니다. 비밀번호를 확인하세요." });
             report({ kind: "error", message: "인증 실패" });
@@ -199,6 +228,7 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts }: Te
     async (secret: string | null, saveSecret: boolean) => {
       const t = term.current;
       if (!t || disposed.current) return;
+      if (secret !== null) pendingTarget.current = { secret, save: saveSecret };
       setEnded(false);
       setOverlay({ kind: "none" });
       lastError.current = null;
@@ -221,8 +251,10 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts }: Te
               profileId: profile.id,
               cols: t.cols,
               rows: t.rows,
-              secret,
-              saveSecret,
+              secret: pendingTarget.current?.secret ?? null,
+              saveSecret: pendingTarget.current?.save ?? false,
+              jumpSecrets: Object.keys(jumpSecrets.current).length > 0 ? { ...jumpSecrets.current } : null,
+              saveJumpSecrets: saveJumpSecrets.current,
               events,
               output,
             });
@@ -235,7 +267,14 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts }: Te
       } catch (e) {
         if (!current()) return;
         setEnded(true);
-        if (isApiError(e) && e.code === "passwordRequired") {
+        if (isApiError(e) && (e.code === "jumpPasswordRequired" || e.code === "jumpPassphraseRequired") && e.profileId) {
+          setOverlay({
+            kind: "jumpSecret",
+            profileId: e.profileId,
+            name: e.message,
+            mode: e.code === "jumpPassphraseRequired" ? "passphrase" : "password",
+          });
+        } else if (isApiError(e) && e.code === "passwordRequired") {
           setOverlay({ kind: "secret", mode: "password" });
         } else if (isApiError(e) && e.code === "passphraseRequired") {
           setOverlay({ kind: "secret", mode: "passphrase" });
@@ -330,8 +369,14 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts }: Te
 
   const target = `${profile.username}@${profile.host}:${profile.port}`;
 
+  const freshConnect = () => {
+    pendingTarget.current = null;
+    jumpSecrets.current = {};
+    void connect(null, false);
+  };
+
   const reconnect = (
-    <button type="button" className="button button-secondary button-small" onClick={() => connect(null, false)}>
+    <button type="button" className="button button-secondary button-small" onClick={freshConnect}>
       다시 연결
     </button>
   );
@@ -395,6 +440,27 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts }: Te
           error={overlay.error}
           onSubmit={(secret, save) => void connect(secret, save)}
           onCancel={() => {
+            pendingTarget.current = null;
+            jumpSecrets.current = {};
+            setOverlay({ kind: "none" });
+            report({ kind: "closed", message: "연결 취소됨" });
+          }}
+        />
+      )}
+      {active && overlay.kind === "jumpSecret" && (
+        <SecretPrompt
+          kind={overlay.mode}
+          name={`점프 호스트 ${overlay.name}`}
+          target={`${target} 경유`}
+          error={overlay.error}
+          onSubmit={(secret, save) => {
+            jumpSecrets.current[overlay.profileId] = secret;
+            saveJumpSecrets.current = save;
+            void connect(null, false);
+          }}
+          onCancel={() => {
+            pendingTarget.current = null;
+            jumpSecrets.current = {};
             setOverlay({ kind: "none" });
             report({ kind: "closed", message: "연결 취소됨" });
           }}
