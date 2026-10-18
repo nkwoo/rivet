@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Profile } from "../lib/api.ts";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
-import { CheckIcon, DownloadIcon, EditIcon, StarIcon } from "../components/Icons.tsx";
+import { DownloadIcon, EditIcon, SelectIcon, StarIcon } from "../components/Icons.tsx";
 import { ProtocolBadge } from "./ProtocolBadge.tsx";
 
 interface SidebarProps {
@@ -102,36 +102,29 @@ export function Sidebar({
 
   return (
     <nav aria-label="연결 목록" className="sidebar">
-      <div className="sidebar-tools">
-        {selecting ? (
-          <>
-            <label className="checkbox sidebar-select-all">
-              <input
-                type="checkbox"
-                checked={allVisibleSelected}
-                onChange={() => setMany(filtered, !allVisibleSelected)}
-              />
-              <span>전체 선택</span>
-            </label>
-            <button
-              type="button"
-              className="button button-danger button-small"
-              disabled={chosen.length === 0 || busy}
-              onClick={() => setConfirming(true)}
-            >
-              {chosen.length}개 삭제
-            </button>
-            <button type="button" className="button button-ghost button-small" onClick={stopSelecting}>
-              취소
-            </button>
-          </>
-        ) : (
-          <button type="button" className="button button-secondary button-small" onClick={() => setSelecting(true)}>
-            <CheckIcon />
-            선택
+      {selecting && (
+        <div className="sidebar-tools">
+          <label className="checkbox sidebar-select-all">
+            <input
+              type="checkbox"
+              checked={allVisibleSelected}
+              onChange={() => setMany(filtered, !allVisibleSelected)}
+            />
+            <span>전체 선택</span>
+          </label>
+          <button
+            type="button"
+            className="button button-danger button-small"
+            disabled={chosen.length === 0 || busy}
+            onClick={() => setConfirming(true)}
+          >
+            {chosen.length}개 삭제
           </button>
-        )}
-      </div>
+          <button type="button" className="button button-ghost button-small" onClick={stopSelecting}>
+            취소
+          </button>
+        </div>
+      )}
       {groups.length === 0 && <p className="sidebar-empty">“{query}”와 일치하는 연결이 없습니다.</p>}
       {groups.map(([name, items]) => {
         const groupSelected = items.every((p) => selected.has(p.id));
@@ -173,7 +166,14 @@ export function Sidebar({
                       title={selecting ? `${p.name} 선택` : `${p.name}에 연결`}
                     >
                       {selecting && (
-                        <input type="checkbox" className="host-check" checked={isChecked} readOnly tabIndex={-1} aria-hidden="true" />
+                        <input
+                          type="checkbox"
+                          className="host-check"
+                          checked={isChecked}
+                          readOnly
+                          tabIndex={-1}
+                          aria-hidden="true"
+                        />
                       )}
                       <ProtocolBadge protocol={p.protocol} />
                       <span className="host-text">
@@ -197,14 +197,29 @@ export function Sidebar({
                       />
                     </button>
                     {!selecting && (
-                      <button
-                        type="button"
-                        className="icon-button host-edit"
-                        aria-label={`${p.name} 편집`}
-                        onClick={() => onEdit(p)}
-                      >
-                        <EditIcon />
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="icon-button host-select"
+                          aria-label={`${p.name} 선택해서 삭제`}
+                          title="선택해서 삭제"
+                          onClick={() => {
+                            setSelected(new Set([p.id]));
+                            setSelecting(true);
+                          }}
+                        >
+                          <SelectIcon />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-button host-edit"
+                          aria-label={`${p.name} 편집`}
+                          title="편집"
+                          onClick={() => onEdit(p)}
+                        >
+                          <EditIcon />
+                        </button>
+                      </>
                     )}
                   </li>
                 );
