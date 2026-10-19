@@ -419,6 +419,126 @@ textarea {
   display: none;
 }
 
+/* ---------- 분할 창 ---------- */
+
+.split-view {
+  position: absolute;
+  inset: 0;
+}
+
+.split-view[hidden] {
+  display: none;
+}
+
+.split-pane {
+  position: absolute;
+  overflow: hidden;
+}
+
+/* 좁은 창: 머리글이 넘치면 창 이름부터 줄이고, 나머지는 잘라냄 */
+.split-pane .session-bar {
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* 포커스된 창: 머리글 위쪽에 Signal 줄, 나머지 창의 터미널은 살짝 어둡게 */
+.split-view.is-split .split-pane.is-focused .session-bar {
+  box-shadow: inset 0 2px 0 var(--signal);
+}
+
+.split-view.is-split .split-pane:not(.is-focused) .terminal-host {
+  opacity: 0.72;
+}
+
+.split-divider {
+  position: absolute;
+  z-index: 2;
+  touch-action: none;
+}
+
+.split-divider::after {
+  content: "";
+  position: absolute;
+  background: var(--steel);
+  transition: background 0.12s;
+}
+
+.split-divider:hover::after {
+  background: var(--signal);
+}
+
+.split-divider-row {
+  width: 7px;
+  transform: translateX(-50%);
+  cursor: col-resize;
+}
+
+.split-divider-row::after {
+  inset: 0 3px;
+}
+
+.split-divider-column {
+  height: 7px;
+  transform: translateY(-50%);
+  cursor: row-resize;
+}
+
+.split-divider-column::after {
+  inset: 3px 0;
+}
+
+.split-drop {
+  position: absolute;
+  z-index: 3;
+  background: rgb(242 123 43 / 0.14);
+  border: 2px solid var(--signal);
+  pointer-events: none;
+}
+
+body.is-resizing-col,
+body.is-resizing-col * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+body.is-resizing-row,
+body.is-resizing-row * {
+  cursor: row-resize !important;
+  user-select: none;
+}
+
+body.is-dragging,
+body.is-dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+.pane-title {
+  min-width: 0;
+  margin-left: 12px;
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-actions {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.tab-panes {
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--line-strong);
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 16px;
+}
+
 .session-bar {
   flex: none;
   display: flex;

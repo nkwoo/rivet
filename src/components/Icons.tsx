@@ -178,3 +178,17 @@ export const SelectIcon = () => (
     <path d="m8.5 12 2.5 2.5 4.5-5" />
   </svg>
 );
+
+export const SplitRightIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" {...base}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M12 4v16" />
+  </svg>
+);
+
+export const SplitDownIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" {...base}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M3 12h18" />
+  </svg>
+);

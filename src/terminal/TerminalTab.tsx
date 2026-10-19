@@ -9,7 +9,8 @@ import { api, isApiError, toBytes, type ConnectionInfo, type Profile, type Sessi
 import { CertChanged, CertPrompt, HostKeyChanged, HostKeyPrompt } from "../security/HostKeyDialogs.tsx";
 import { SecretPrompt } from "../profiles/SecretPrompt.tsx";
 import { FileBrowser } from "../files/FileBrowser.tsx";
-import { FolderIcon, TerminalIcon } from "../components/Icons.tsx";
+import { CloseIcon, FolderIcon, SplitDownIcon, SplitRightIcon, TerminalIcon } from "../components/Icons.tsx";
+import type { SplitDirection } from "./layout.ts";
 
 export type TabState =
   | { kind: "connecting" }
@@ -26,9 +27,23 @@ type Overlay =
   | { kind: "certPrompt"; event: Extract<SessionEvent, { type: "certPrompt" }> }
   | { kind: "certChanged"; event: Extract<SessionEvent, { type: "certChanged" }> };
 
+/** 분할 창 조작. SSH 프로필에만 줍니다. */
+export interface PaneControls {
+  /** 같은 탭에 창이 2개 이상인지 (창 이름과 닫기 버튼 표시) */
+  split: boolean;
+  onSplit: (direction: SplitDirection) => void;
+  onClose: () => void;
+}
+
 interface TerminalTabProps {
   profile: Profile;
+  /** 이 창이 들어 있는 탭이 보이는지 */
   active: boolean;
+  /** 키보드 입력을 받을 창인지 (분할된 탭에서 하나만 true) */
+  focused: boolean;
+  /** 창 안을 누르거나 포커스가 들어오면 호출 */
+  onFocus: () => void;
+  pane?: PaneControls | undefined;
   onState: (state: TabState) => void;
   onReviewKnownHosts: (host: string, port: number) => void;
   /** 앱 전체 알림 (키체인 저장 실패 등) */
@@ -95,12 +110,27 @@ function describeExit(exitStatus: number | null): string {
 
 type View = "terminal" | "files";
 
+const IS_MAC = navigator.userAgent.includes("Mac");
+/** 분할 단축키 표시 (App.tsx의 처리와 맞춤) */
+export const SPLIT_KEYS = IS_MAC
+  ? { right: "⌘D", down: "⇧⌘D", focus: "⌥⌘방향키", close: "⌘W" }
+  : { right: "Alt+Shift+=", down: "Alt+Shift+-", focus: "Alt+방향키", close: "Ctrl+Shift+W" };
+
 /**
  * SSH 연결 하나를 맡는 탭. 셸은 xterm.js에, 파일 화면은 같은 연결의 SFTP에 붙습니다.
  * 출력은 바이너리 Channel로 받고, 입력은 순서를 지키도록 한 번에 하나씩 보냅니다.
  * SFTP 프로필은 셸 없이 파일 화면만 보여줍니다.
  */
-export function TerminalTab({ profile, active, onState, onReviewKnownHosts, onNotice }: TerminalTabProps) {
+export function TerminalTab({
+  profile,
+  active,
+  focused,
+  onFocus,
+  pane,
+  onState,
+  onReviewKnownHosts,
+  onNotice,
+}: TerminalTabProps) {
   const container = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -121,6 +151,8 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts, onNo
   const jumpFailure = useRef<{ profileId: string; name: string } | null>(null);
   const onStateRef = useRef(onState);
   onStateRef.current = onState;
+  const focusedRef = useRef(focused);
+  focusedRef.current = focused;
 
   /** SFTP/FTP/FTPS 프로필은 셸 없이 파일 화면만 */
   const filesOnly = profile.protocol !== "ssh";
@@ -185,7 +217,7 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts, onNo
           connectedSeen.current = true;
           if (session.current) setSessionId(session.current);
           report({ kind: "connected", info });
-          term.current?.focus();
+          if (focusedRef.current) term.current?.focus();
           break;
         }
         case "error":
@@ -355,7 +387,7 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts, onNo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 창/패널 크기 변화에 맞춰 터미널 크기 조정 (보이는 탭의 터미널 화면만)
+  // 창/패널 크기 변화에 맞춰 터미널 크기 조정 (보이는 탭의 터미널 화면만, 분할 경계를 끌 때 포함)
   useEffect(() => {
     const el = container.current;
     if (!el || !active || view !== "terminal") return;
@@ -363,11 +395,15 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts, onNo
       if (el.clientWidth > 0 && el.clientHeight > 0) fit.current?.fit();
     };
     refit();
-    term.current?.focus();
     const observer = new ResizeObserver(refit);
     observer.observe(el);
     return () => observer.disconnect();
   }, [active, view]);
+
+  // 포커스된 창의 터미널에 키보드 입력을 줌
+  useEffect(() => {
+    if (active && focused && view === "terminal") term.current?.focus();
+  }, [active, focused, view]);
 
   const respondHostKey = (accept: boolean) => {
     const id = session.current;
@@ -390,7 +426,7 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts, onNo
   );
 
   return (
-    <div className="terminal-tab" hidden={!active}>
+    <div className="terminal-tab" hidden={!active} onFocusCapture={onFocus} onPointerDownCapture={onFocus}>
       {!filesOnly && (
         <div className="session-bar">
           <div role="tablist" aria-label="화면" className="view-switch">
@@ -417,6 +453,44 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts, onNo
               파일
             </button>
           </div>
+          {pane?.split && (
+            <span className="pane-title" title={target}>
+              {profile.name}
+            </span>
+          )}
+          {pane && (
+            <div className="pane-actions">
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="오른쪽으로 나누기"
+                title={`오른쪽으로 나누기 (${SPLIT_KEYS.right})`}
+                onClick={() => pane.onSplit("row")}
+              >
+                <SplitRightIcon />
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="아래로 나누기"
+                title={`아래로 나누기 (${SPLIT_KEYS.down})`}
+                onClick={() => pane.onSplit("column")}
+              >
+                <SplitDownIcon />
+              </button>
+              {pane.split && (
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={`${profile.name} 창 닫기`}
+                  title="창 닫기 (연결 종료)"
+                  onClick={pane.onClose}
+                >
+                  <CloseIcon />
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
       <div className="session-body">
