@@ -31,6 +31,8 @@ interface TerminalTabProps {
   active: boolean;
   onState: (state: TabState) => void;
   onReviewKnownHosts: (host: string, port: number) => void;
+  /** 앱 전체 알림 (키체인 저장 실패 등) */
+  onNotice: (message: string) => void;
 }
 
 /** 한 번에 보내는 입력 크기 (UTF-16 단위). UTF-8로 최대 48KiB라 백엔드 상한 64KiB 안에 들어감 */
@@ -79,6 +81,7 @@ const SESSION_ERROR_TEXT: Record<string, string> = {
   certRejected: "인증서를 승인하지 않아 연결을 취소했습니다",
   tls: "TLS 연결에 실패했습니다",
   connectionLost: "연결이 끊어졌습니다",
+  secretStore: "키체인에 접근하지 못했습니다",
 };
 
 function sessionErrorText(code: string, message: string): string {
@@ -97,7 +100,7 @@ type View = "terminal" | "files";
  * 출력은 바이너리 Channel로 받고, 입력은 순서를 지키도록 한 번에 하나씩 보냅니다.
  * SFTP 프로필은 셸 없이 파일 화면만 보여줍니다.
  */
-export function TerminalTab({ profile, active, onState, onReviewKnownHosts }: TerminalTabProps) {
+export function TerminalTab({ profile, active, onState, onReviewKnownHosts, onNotice }: TerminalTabProps) {
   const container = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -164,6 +167,11 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts }: Te
         case "certChanged":
           setOverlay({ kind: "certChanged", event });
           break;
+        case "secretNotSaved":
+          onNotice(
+            `${event.name ? `점프 호스트 ${event.name}` : profile.name}의 비밀번호를 키체인에 저장하지 못했습니다. 다음 접속 때 다시 입력해야 합니다. (${event.message})`,
+          );
+          break;
         case "jumpAuthFailed":
           jumpFailure.current = { profileId: event.profileId, name: event.name };
           delete jumpSecrets.current[event.profileId];
@@ -221,7 +229,7 @@ export function TerminalTab({ profile, active, onState, onReviewKnownHosts }: Te
         }
       }
     },
-    [profile.authMethod, report],
+    [profile.authMethod, profile.name, report, onNotice],
   );
 
   const connect = useCallback(

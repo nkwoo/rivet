@@ -110,6 +110,8 @@ export type SessionEvent =
   | ({ type: "connected" } & ConnectionInfo)
   | { type: "clipboard"; direction: "toRemote" | "toLocal"; chars: number }
   | { type: "jumpAuthFailed"; profileId: string; name: string }
+  /** 인증은 됐지만 키체인 저장 실패 (`name`이 비면 이 탭의 연결) */
+  | { type: "secretNotSaved"; name: string; message: string }
   | { type: "closed"; exitStatus: number | null }
   | { type: "error"; code: string; message: string };
 

@@ -238,6 +238,7 @@ export default function App() {
                   active={t.id === activeTab}
                   onState={(state) => setTabState(t.id, state)}
                   onReviewKnownHosts={(host, port) => setKnownHosts({ highlight: { host, port } })}
+                  onNotice={showToast}
                   onImmersive={setImmersive}
                 />
               ) : (
@@ -247,6 +248,7 @@ export default function App() {
                   active={t.id === activeTab}
                   onState={(state) => setTabState(t.id, state)}
                   onReviewKnownHosts={(host, port) => setKnownHosts({ highlight: { host, port } })}
+                  onNotice={showToast}
                 />
               ),
             )}

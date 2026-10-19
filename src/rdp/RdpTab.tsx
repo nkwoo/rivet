@@ -30,6 +30,8 @@ interface RdpTabProps {
   active: boolean;
   onState: (state: TabState) => void;
   onReviewKnownHosts: (host: string, port: number) => void;
+  /** 앱 전체 알림 (키체인 저장 실패 등) */
+  onNotice: (message: string) => void;
   /** 전체 화면: 앱의 상단/사이드바/상태 표시줄을 숨김 */
   onImmersive: (on: boolean) => void;
 }
@@ -47,6 +49,7 @@ const ERROR_TEXT: Record<string, string> = {
   rdpNegotiation: "서버와 보안 방식을 협상하지 못했습니다",
   rdpProtocol: "RDP 프로토콜 오류",
   connectionLost: "연결이 끊어졌습니다",
+  secretStore: "키체인에 접근하지 못했습니다",
 };
 
 function errorText(code: string, message: string): string {
@@ -79,7 +82,7 @@ function desiredSize(profile: Profile, stage: HTMLElement | null) {
  * RDP 연결 하나를 맡는 탭. 화면은 바이너리 Channel로 받은 변경 영역을 캔버스에 그리고,
  * 키보드/마우스는 묶어서 순서대로 보냅니다. 키보드는 숨은 입력란이 받아 IME(한글 등) 조합을 지원합니다.
  */
-export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersive }: RdpTabProps) {
+export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice, onImmersive }: RdpTabProps) {
   /** 탭 전체 영역. 스크롤 막대의 영향을 받지 않아 원격 해상도 계산에 씀 (스크롤되는 화면 영역을 재면 크기가 계속 바뀜) */
   const root = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -188,6 +191,11 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
         case "hostKeyChanged":
           setOverlay({ kind: "hostKeyChanged", event });
           break;
+        case "secretNotSaved":
+          onNotice(
+            `${event.name ? `점프 호스트 ${event.name}` : profile.name}의 비밀번호를 키체인에 저장하지 못했습니다. 다음 접속 때 다시 입력해야 합니다. (${event.message})`,
+          );
+          break;
         case "jumpAuthFailed":
           jumpFailure.current = { profileId: event.profileId, name: event.name };
           delete jumpSecrets.current[event.profileId];
@@ -253,7 +261,7 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
           break;
       }
     },
-    [profile.name, report, showToast],
+    [profile.name, report, showToast, onNotice],
   );
 
   const connect = useCallback(

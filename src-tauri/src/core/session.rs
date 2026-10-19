@@ -99,6 +99,12 @@ pub enum SessionEvent {
         #[serde(flatten)]
         info: ConnectionInfo,
     },
+    /// 인증은 성공했지만 입력한 비밀 값을 키체인에 저장하지 못함 (연결은 유지)
+    SecretNotSaved {
+        /// 점프 호스트 이름. 비어 있으면 이 탭의 연결
+        name: String,
+        message: String,
+    },
     /// 점프 호스트 인증 실패: UI가 해당 점프 호스트의 비밀번호를 다시 받음
     JumpAuthFailed {
         profile_id: String,
@@ -135,7 +141,7 @@ pub struct JumpHop {
     pub name: String,
     pub target: SshTarget,
     pub auth: SshAuth,
-    pub on_authenticated: Option<Box<dyn FnOnce() + Send>>,
+    pub on_authenticated: OnAuthenticated,
 }
 
 /// SSH 세션 시작 요청
@@ -147,11 +153,24 @@ pub struct SshSessionRequest {
     /// 셸을 열 때의 터미널 크기. `None`이면 셸 없이 연결만 유지합니다(SFTP 프로필).
     pub pty: Option<(u32, u32)>,
     /// 인증에 성공하면 한 번 호출됩니다. (새로 입력받은 비밀 값을 keyring에 저장)
-    pub on_authenticated: Option<Box<dyn FnOnce() + Send>>,
+    pub on_authenticated: OnAuthenticated,
 }
 
-/// 인증 성공 후에 한 번 호출하는 콜백 (새로 입력받은 비밀 값 저장)
-type OnAuthenticated = Option<Box<dyn FnOnce() + Send>>;
+/// 인증 성공 후에 한 번 호출하는 콜백 (새로 입력받은 비밀 값을 keyring에 저장)
+pub type SaveSecret = Box<dyn FnOnce() -> Result<()> + Send>;
+type OnAuthenticated = Option<SaveSecret>;
+
+/// 인증 후 비밀 값을 저장합니다. 실패하면 연결은 그대로 두고 사용자에게 알립니다.
+fn save_secret_now(save: OnAuthenticated, who: &str, sink: &Arc<dyn SessionSink>) {
+    if let Some(save) = save {
+        if let Err(e) = save() {
+            sink.event(SessionEvent::SecretNotSaved {
+                name: who.to_owned(),
+                message: e.to_string(),
+            });
+        }
+    }
+}
 
 /// 비밀 값 저장 콜백 (인증 성공 후에만 호출)
 fn save_after_auth(
@@ -164,11 +183,7 @@ fn save_after_auth(
     match secret {
         Some(secret) if from_user && save => {
             let (id, secrets) = (profile.id.clone(), secrets.clone());
-            Some(Box::new(move || {
-                if let Err(e) = secrets.set(&id, &secret) {
-                    tracing::warn!(error = %e, "could not save secret to keychain");
-                }
-            }))
+            Some(Box::new(move || secrets.set(&id, &secret)))
         }
         _ => None,
     }
@@ -290,9 +305,7 @@ async fn connect_jumps(
             }
         })?;
         tracing::info!(host = %hop_target.host, port = hop_target.port, "ssh jump host authenticated");
-        if let Some(callback) = hop_saved {
-            callback();
-        }
+        save_secret_now(hop_saved, &name, sink);
         via_names.push(name);
         via = Some(Arc::new(conn));
     }
@@ -336,7 +349,7 @@ pub fn prepare_ssh_request(
 pub struct FtpSessionRequest {
     pub target: FtpTarget,
     pub password: SecretString,
-    pub on_authenticated: Option<Box<dyn FnOnce() + Send>>,
+    pub on_authenticated: OnAuthenticated,
 }
 
 /// 비밀번호를 묻지 않는 익명 FTP 사용자명
@@ -379,14 +392,10 @@ pub fn prepare_ftp_request(
         return Err(Error::Invalid("password contains line breaks".into()));
     }
 
-    let on_authenticated: Option<Box<dyn FnOnce() + Send>> = match secret {
+    let on_authenticated: OnAuthenticated = match secret {
         Some(secret) if from_user && save_secret => {
             let id = profile.id.clone();
-            Some(Box::new(move || {
-                if let Err(e) = secrets.set(&id, &secret) {
-                    tracing::warn!(error = %e, "could not save secret to keychain");
-                }
-            }))
+            Some(Box::new(move || secrets.set(&id, &secret)))
         }
         _ => None,
     };
@@ -411,7 +420,7 @@ pub struct RdpSessionRequest {
     pub password: SecretString,
     pub size: DisplaySize,
     pub clipboard: bool,
-    pub on_authenticated: Option<Box<dyn FnOnce() + Send>>,
+    pub on_authenticated: OnAuthenticated,
 }
 
 /// 프로필로 RDP 세션 요청을 만듭니다. 비밀번호가 없으면 `PasswordRequired`를 돌려줍니다.
@@ -434,13 +443,9 @@ pub fn prepare_rdp_request(
         Some(s) => s,
         None => secrets.get(&profile.id)?.ok_or(Error::PasswordRequired)?,
     };
-    let on_authenticated: Option<Box<dyn FnOnce() + Send>> = if from_user && save_secret {
+    let on_authenticated: OnAuthenticated = if from_user && save_secret {
         let (id, secret) = (profile.id.clone(), password.clone());
-        Some(Box::new(move || {
-            if let Err(e) = secrets.set(&id, &secret) {
-                tracing::warn!(error = %e, "could not save secret to keychain");
-            }
-        }))
+        Some(Box::new(move || secrets.set(&id, &secret)))
     } else {
         None
     };
@@ -826,9 +831,7 @@ async fn run_ssh_session(
         conn.set_via_names(via_names);
         let conn = Arc::new(conn);
         tracing::info!(host = %target.host, port = target.port, "ssh authenticated");
-        if let Some(callback) = on_authenticated {
-            callback();
-        }
+        save_secret_now(on_authenticated, "", &sink);
         if !store_connection(conn.clone()) {
             // 인증 도중 탭이 닫힘
             conn.disconnect().await;
@@ -885,9 +888,7 @@ async fn run_ftp_session(
     let result = async {
         let fs = connect_ftp(&target, &password, &pins, &manager, &id, &sink).await?;
         tracing::info!(host = %target.host, port = target.port, "ftp authenticated");
-        if let Some(callback) = on_authenticated {
-            callback();
-        }
+        save_secret_now(on_authenticated, "", &sink);
         let info = ftp_connection_info(fs.info());
         let fs = Arc::new(fs);
         let stored = manager.upgrade().is_some_and(|m| m.set_fs(&id, fs.clone()));
@@ -1174,9 +1175,7 @@ async fn run_rdp_session(
         drop(password);
         let conn = conn?;
         tracing::info!(host = %target.host, port = target.port, nla = conn.info().nla, "rdp connected");
-        if let Some(callback) = on_authenticated {
-            callback();
-        }
+        save_secret_now(on_authenticated, "", &sink);
         if manager.upgrade().is_none() {
             return Ok(());
         }
@@ -1368,7 +1367,7 @@ mod tests {
         )
         .unwrap();
         assert!(store.get("p1").unwrap().is_none());
-        (req.on_authenticated.unwrap())();
+        (req.on_authenticated.unwrap())().unwrap();
         assert_eq!(store.get("p1").unwrap().unwrap().expose_secret(), "typed");
     }
 
@@ -1468,7 +1467,7 @@ mod tests {
         let JumpHop {
             on_authenticated, ..
         } = req.jumps.into_iter().next().unwrap();
-        (on_authenticated.unwrap())();
+        (on_authenticated.unwrap())().unwrap();
         assert_eq!(
             store.get("jump").unwrap().unwrap().expose_secret(),
             "jump-pw"
