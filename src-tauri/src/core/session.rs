@@ -223,6 +223,82 @@ pub struct JumpSecrets {
     pub save: bool,
 }
 
+/// 점프 호스트 단계별 인증 수단을 만듭니다. 비밀 값이 없으면 어느 점프 호스트인지 담아 `JumpSecretRequired`.
+fn prepare_jumps(
+    jumps: &[Profile],
+    jump_secrets: &mut JumpSecrets,
+    secrets: &Arc<dyn SecretStore>,
+) -> Result<Vec<JumpHop>> {
+    let mut hops = Vec::with_capacity(jumps.len());
+    for jump in jumps {
+        let provided = jump_secrets.provided.remove(&jump.id);
+        let (auth, on_authenticated) = ssh_auth(jump, provided, jump_secrets.save, secrets)
+            .map_err(|e| match e.code() {
+                "passwordRequired" | "passphraseRequired" => Error::JumpSecretRequired {
+                    profile_id: jump.id.clone(),
+                    name: jump.name.clone(),
+                    passphrase: e.code() == "passphraseRequired",
+                },
+                _ => e,
+            })?;
+        hops.push(JumpHop {
+            profile_id: jump.id.clone(),
+            name: jump.name.clone(),
+            target: ssh_target(jump),
+            auth,
+            on_authenticated,
+        });
+    }
+    Ok(hops)
+}
+
+/// 점프 호스트를 차례로 연결합니다. 각 단계의 호스트 키도 똑같이 검증하고, 인증이 실패하면
+/// 어느 점프 호스트인지 이벤트로 알립니다. 마지막 단계 연결과 경유 이름 목록을 돌려줍니다.
+async fn connect_jumps(
+    jumps: Vec<JumpHop>,
+    verifier: Arc<dyn HostKeyVerifier>,
+    sink: &Arc<dyn SessionSink>,
+) -> Result<(Option<Arc<SshConnection>>, Vec<String>)> {
+    let mut via: Option<Arc<SshConnection>> = None;
+    let mut via_names = Vec::new();
+    for hop in jumps {
+        let JumpHop {
+            profile_id,
+            name,
+            target: hop_target,
+            auth: hop_auth,
+            on_authenticated: hop_saved,
+        } = hop;
+        let conn = match via.take() {
+            None => SshConnection::connect(&hop_target, &hop_auth, verifier.clone()).await,
+            Some(prev) => {
+                SshConnection::connect_via(prev, &hop_target, &hop_auth, verifier.clone()).await
+            }
+        };
+        // 인증이 끝나면 비밀 값을 메모리에서 바로 지웁니다.
+        drop(hop_auth);
+        let conn = conn.map_err(|source| {
+            if matches!(source, SshError::AuthFailed) {
+                sink.event(SessionEvent::JumpAuthFailed {
+                    profile_id: profile_id.clone(),
+                    name: name.clone(),
+                });
+            }
+            Error::Jump {
+                name: name.clone(),
+                source,
+            }
+        })?;
+        tracing::info!(host = %hop_target.host, port = hop_target.port, "ssh jump host authenticated");
+        if let Some(callback) = hop_saved {
+            callback();
+        }
+        via_names.push(name);
+        via = Some(Arc::new(conn));
+    }
+    Ok((via, via_names))
+}
+
 /// 프로필과 저장된/입력받은 비밀 값으로 SSH 세션 요청을 만듭니다.
 ///
 /// 비밀 값이 필요한데 없으면 `PasswordRequired`/`PassphraseRequired`를 돌려주어
@@ -245,27 +321,7 @@ pub fn prepare_ssh_request(
         _ => return Err(Error::Invalid("profile is not an SSH/SFTP profile".into())),
     };
 
-    let mut hops = Vec::with_capacity(jumps.len());
-    for jump in jumps {
-        let provided = jump_secrets.provided.remove(&jump.id);
-        let (auth, on_authenticated) = ssh_auth(jump, provided, jump_secrets.save, &secrets)
-            .map_err(|e| match e.code() {
-                "passwordRequired" | "passphraseRequired" => Error::JumpSecretRequired {
-                    profile_id: jump.id.clone(),
-                    name: jump.name.clone(),
-                    passphrase: e.code() == "passphraseRequired",
-                },
-                _ => e,
-            })?;
-        hops.push(JumpHop {
-            profile_id: jump.id.clone(),
-            name: jump.name.clone(),
-            target: ssh_target(jump),
-            auth,
-            on_authenticated,
-        });
-    }
-
+    let hops = prepare_jumps(jumps, &mut jump_secrets, &secrets)?;
     let (auth, on_authenticated) = ssh_auth(profile, provided_secret, save_secret, &secrets)?;
     Ok(SshSessionRequest {
         jumps: hops,
@@ -349,6 +405,8 @@ pub fn prepare_ftp_request(
 
 /// RDP 세션 시작 요청
 pub struct RdpSessionRequest {
+    /// SSH 터널로 거쳐 갈 점프 호스트 (접속 순서). 비어 있으면 직접 연결
+    pub jumps: Vec<JumpHop>,
     pub target: RdpTarget,
     pub password: SecretString,
     pub size: DisplaySize,
@@ -357,16 +415,20 @@ pub struct RdpSessionRequest {
 }
 
 /// 프로필로 RDP 세션 요청을 만듭니다. 비밀번호가 없으면 `PasswordRequired`를 돌려줍니다.
+/// `jumps`가 있으면 SSH 터널(점프 호스트)을 거쳐 접속합니다.
 pub fn prepare_rdp_request(
     profile: &Profile,
+    jumps: &[Profile],
     provided_secret: Option<SecretString>,
     save_secret: bool,
+    mut jump_secrets: JumpSecrets,
     secrets: Arc<dyn SecretStore>,
     size: DisplaySize,
 ) -> Result<RdpSessionRequest> {
     if profile.protocol != Protocol::Rdp {
         return Err(Error::Invalid("profile is not an RDP profile".into()));
     }
+    let jumps = prepare_jumps(jumps, &mut jump_secrets, &secrets)?;
     let from_user = provided_secret.is_some();
     let password = match provided_secret {
         Some(s) => s,
@@ -383,6 +445,7 @@ pub fn prepare_rdp_request(
         None
     };
     Ok(RdpSessionRequest {
+        jumps,
         target: RdpTarget {
             host: profile.host.clone(),
             port: profile.port,
@@ -588,6 +651,7 @@ impl SessionManager {
         self: &Arc<Self>,
         request: RdpSessionRequest,
         pins: Arc<CertPinStore>,
+        known_hosts: Arc<KnownHostsStore>,
         sink: Arc<dyn SessionSink>,
         clipboard: Arc<dyn LocalClipboard>,
     ) -> SessionId {
@@ -595,12 +659,20 @@ impl SessionManager {
         let (tx, rx) = mpsc::channel(COMMAND_QUEUE);
         self.slots()
             .insert(id.clone(), Slot::new(Commands::Rdp(tx)));
+        // 점프 호스트(SSH 터널)의 호스트 키 검증용
+        let verifier = Arc::new(InteractiveVerifier {
+            store: known_hosts,
+            manager: Arc::downgrade(self),
+            session_id: id.clone(),
+            sink: sink.clone(),
+        });
         let manager = Arc::downgrade(self);
         let session_id = id.clone();
         let task = tokio::spawn(async move {
             run_rdp_session(
                 request,
                 pins,
+                verifier,
                 manager.clone(),
                 session_id.clone(),
                 rx,
@@ -743,42 +815,7 @@ async fn run_ssh_session(
     } = request;
 
     let result = async {
-        // 점프 호스트를 차례로 연결합니다. 각 단계의 호스트 키도 똑같이 검증합니다.
-        let mut via: Option<Arc<SshConnection>> = None;
-        let mut via_names = Vec::new();
-        for hop in jumps {
-            let JumpHop {
-                profile_id,
-                name,
-                target: hop_target,
-                auth: hop_auth,
-                on_authenticated: hop_saved,
-            } = hop;
-            let conn = match via.take() {
-                None => SshConnection::connect(&hop_target, &hop_auth, verifier.clone()).await,
-                Some(prev) => SshConnection::connect_via(prev, &hop_target, &hop_auth, verifier.clone()).await,
-            };
-            drop(hop_auth);
-            let conn = conn.map_err(|source| {
-                if matches!(source, SshError::AuthFailed) {
-                    sink.event(SessionEvent::JumpAuthFailed {
-                        profile_id: profile_id.clone(),
-                        name: name.clone(),
-                    });
-                }
-                Error::Jump {
-                    name: name.clone(),
-                    source,
-                }
-            })?;
-            tracing::info!(host = %hop_target.host, port = hop_target.port, "ssh jump host authenticated");
-            if let Some(callback) = hop_saved {
-                callback();
-            }
-            via_names.push(name);
-            via = Some(Arc::new(conn));
-        }
-
+        let (via, via_names) = connect_jumps(jumps, verifier.clone(), &sink).await?;
         let conn = match via {
             None => SshConnection::connect(&target, &auth, verifier).await,
             Some(jump) => SshConnection::connect_via(jump, &target, &auth, verifier).await,
@@ -1018,6 +1055,47 @@ async fn connect_ftp(
     .await
 }
 
+/// RDP 접속 한 번 (인증서 확인 결과 포함). 점프 호스트가 있으면 매번 새 SSH 터널을 엽니다.
+async fn rdp_attempt(
+    target: RdpTarget,
+    password: SecretString,
+    pinned: Option<String>,
+    size: DisplaySize,
+    clipboard: bool,
+    via: Option<Arc<SshConnection>>,
+) -> TlsAttempt<RdpConnection> {
+    let tunnel = match via {
+        Some(jump) => match jump.open_tunnel(target.bare_host(), target.port).await {
+            Ok(stream) => Some(tunnel_transport(stream)),
+            Err(e) => return TlsAttempt::Failed(e.into()),
+        },
+        None => None,
+    };
+    match RdpConnection::connect(&target, &password, pinned, size, clipboard, tunnel).await {
+        Ok(conn) => TlsAttempt::Connected(conn),
+        Err(RdpError::CertUntrusted {
+            fingerprint,
+            problem,
+        }) => TlsAttempt::Untrusted {
+            fingerprint,
+            problem,
+        },
+        Err(e) => TlsAttempt::Failed(e.into()),
+    }
+}
+
+/// SSH 터널 채널을 RDP 전송 스트림으로 바꿉니다. 채널 스트림은 `Sync`가 아니어서 메모리 파이프로 잇습니다.
+fn tunnel_transport(
+    stream: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+) -> tokio::io::DuplexStream {
+    let (near, mut far) = tokio::io::duplex(256 * 1024);
+    tokio::spawn(async move {
+        let mut stream = stream;
+        let _ = tokio::io::copy_bidirectional(&mut stream, &mut far).await;
+    });
+    near
+}
+
 /// RDP 세션 출력을 [`SessionSink`]로 보냅니다.
 struct RdpSink(Arc<dyn SessionSink>);
 
@@ -1038,9 +1116,11 @@ impl RdpOutput for RdpSink {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_rdp_session(
     request: RdpSessionRequest,
     pins: Arc<CertPinStore>,
+    verifier: Arc<InteractiveVerifier>,
     manager: Weak<SessionManager>,
     id: SessionId,
     mut commands: mpsc::Receiver<RdpCommand>,
@@ -1048,6 +1128,7 @@ async fn run_rdp_session(
     clipboard: Arc<dyn LocalClipboard>,
 ) {
     let RdpSessionRequest {
+        jumps,
         target,
         password,
         size,
@@ -1055,7 +1136,11 @@ async fn run_rdp_session(
         on_authenticated,
     } = request;
 
+    // 점프 호스트(SSH 터널)부터 연결합니다. 세션이 끝나면 함께 끊습니다.
+    let jumped = connect_jumps(jumps, verifier, &sink).await;
+    let tunnel_via = jumped.as_ref().ok().and_then(|(via, _)| via.clone());
     let result = async {
+        let (via, via_names) = jumped?;
         let conn = connect_pinned(
             &target.host,
             target.port,
@@ -1064,20 +1149,14 @@ async fn run_rdp_session(
             &id,
             &sink,
             |pinned| {
-                let (target, password) = (&target, &password);
-                async move {
-                    match RdpConnection::connect(target, password, pinned, size, share_clipboard).await {
-                        Ok(conn) => TlsAttempt::Connected(conn),
-                        Err(RdpError::CertUntrusted {
-                            fingerprint,
-                            problem,
-                        }) => TlsAttempt::Untrusted {
-                            fingerprint,
-                            problem,
-                        },
-                        Err(e) => TlsAttempt::Failed(e.into()),
-                    }
-                }
+                rdp_attempt(
+                    target.clone(),
+                    password.clone(),
+                    pinned,
+                    size,
+                    share_clipboard,
+                    via.clone(),
+                )
             },
             |f| {
                 match f {
@@ -1101,15 +1180,18 @@ async fn run_rdp_session(
         if manager.upgrade().is_none() {
             return Ok(());
         }
-        sink.event(SessionEvent::Connected {
-            info: rdp_connection_info(conn.info()),
-        });
+        let mut info = rdp_connection_info(conn.info());
+        info.via = via_names;
+        sink.event(SessionEvent::Connected { info });
         let out = RdpSink(sink.clone());
         conn.run(&mut commands, &out, clipboard)
             .await
             .map_err(Error::from)
     }
     .await;
+    if let Some(jump) = tunnel_via {
+        jump.disconnect().await;
+    }
 
     match result {
         Ok(()) => sink.event(SessionEvent::Closed { exit_status: None }),

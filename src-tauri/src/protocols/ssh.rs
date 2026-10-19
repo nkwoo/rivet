@@ -277,7 +277,7 @@ impl SshConnection {
         &self,
         host: &str,
         port: u16,
-    ) -> Result<impl AsyncRead + AsyncWrite + Unpin + Send + 'static, SshError> {
+    ) -> Result<russh::ChannelStream<Msg>, SshError> {
         let channel = self
             .handle
             .channel_open_direct_tcpip(host, u32::from(port), "127.0.0.1", 0)

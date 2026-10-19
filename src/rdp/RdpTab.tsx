@@ -3,7 +3,7 @@ import { Channel } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { api, isApiError, toBytes, type Profile, type RdpInputEvent, type SessionEvent } from "../lib/api.ts";
-import { CertChanged, CertPrompt } from "../security/HostKeyDialogs.tsx";
+import { CertChanged, CertPrompt, HostKeyChanged, HostKeyPrompt } from "../security/HostKeyDialogs.tsx";
 import { SecretPrompt } from "../profiles/SecretPrompt.tsx";
 import {
   CheckIcon,
@@ -19,6 +19,9 @@ import { SC, scancode } from "./keymap.ts";
 type Overlay =
   | { kind: "none" }
   | { kind: "secret"; error?: string }
+  | { kind: "jumpSecret"; profileId: string; name: string; mode: "password" | "passphrase"; error?: string }
+  | { kind: "hostKeyPrompt"; event: Extract<SessionEvent, { type: "hostKeyPrompt" }> }
+  | { kind: "hostKeyChanged"; event: Extract<SessionEvent, { type: "hostKeyChanged" }> }
   | { kind: "certPrompt"; event: Extract<SessionEvent, { type: "certPrompt" }> }
   | { kind: "certChanged"; event: Extract<SessionEvent, { type: "certChanged" }> };
 
@@ -35,6 +38,9 @@ const ERROR_TEXT: Record<string, string> = {
   connect: "서버에 연결할 수 없습니다",
   timeout: "연결 시간이 초과되었습니다",
   authFailed: "인증에 실패했습니다",
+  jumpAuthFailed: "점프 호스트 인증에 실패했습니다",
+  hostKeyChanged: "점프 호스트의 호스트 키가 바뀌어 연결을 차단했습니다",
+  hostKeyRejected: "점프 호스트의 호스트 키를 승인하지 않아 연결을 취소했습니다",
   certChanged: "인증서가 바뀌어 연결을 차단했습니다",
   certRejected: "인증서를 승인하지 않아 연결을 취소했습니다",
   tls: "TLS 연결에 실패했습니다",
@@ -89,6 +95,11 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
   /** macOS ⌘: 다른 키와 함께 누르면 Ctrl, 혼자 누르면 Windows 키 */
   const meta = useRef({ down: false, ctrlSent: false, used: false, right: false });
   const frameCount = useRef(0);
+  /** 이번 접속 시도에서 입력받은 비밀 값. 점프 호스트 비밀번호를 차례로 묻는 동안 유지하고 연결되면 지웁니다. */
+  const pendingTarget = useRef<{ secret: string; save: boolean } | null>(null);
+  const jumpSecrets = useRef<Record<string, string>>({});
+  const saveJumpSecrets = useRef(false);
+  const jumpFailure = useRef<{ profileId: string; name: string } | null>(null);
   /** 진단 표시용 1초 누적값 */
   const stats = useRef({ bytes: 0, drawMs: 0, drawMax: 0, inputLag: [] as number[], inputAt: 0 });
   const onStateRef = useRef(onState);
@@ -171,6 +182,16 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
   const handleEvent = useCallback(
     (event: SessionEvent) => {
       switch (event.type) {
+        case "hostKeyPrompt":
+          setOverlay({ kind: "hostKeyPrompt", event });
+          break;
+        case "hostKeyChanged":
+          setOverlay({ kind: "hostKeyChanged", event });
+          break;
+        case "jumpAuthFailed":
+          jumpFailure.current = { profileId: event.profileId, name: event.name };
+          delete jumpSecrets.current[event.profileId];
+          break;
         case "certPrompt":
           setOverlay({ kind: "certPrompt", event });
           break;
@@ -180,6 +201,8 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
         case "connected": {
           const { type: _t, ...info } = event;
           lastError.current = null;
+          pendingTarget.current = null;
+          jumpSecrets.current = {};
           connectedSeen.current = true;
           setOverlay({ kind: "none" });
           setConnected(true);
@@ -203,11 +226,23 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
           queue.current = [];
           setConnected(false);
           const err = lastError.current;
-          if (err?.code === "authFailed") {
+          const jumpFail = jumpFailure.current;
+          jumpFailure.current = null;
+          if (err?.code === "jumpAuthFailed" && jumpFail) {
+            setOverlay({
+              kind: "jumpSecret",
+              profileId: jumpFail.profileId,
+              name: jumpFail.name,
+              mode: "password",
+              error: "인증에 실패했습니다. 비밀번호를 확인하세요.",
+            });
+            report({ kind: "error", message: "점프 호스트 인증 실패" });
+          } else if (err?.code === "authFailed") {
+            pendingTarget.current = null;
             setOverlay({ kind: "secret", error: `인증에 실패했습니다. 비밀번호를 확인하세요. (${err.message})` });
             report({ kind: "error", message: "인증 실패" });
           } else if (err) {
-            if (err.code !== "certChanged") setOverlay({ kind: "none" });
+            if (err.code !== "certChanged" && err.code !== "hostKeyChanged") setOverlay({ kind: "none" });
             report({ kind: "error", message: errorText(err.code, err.message) });
           } else {
             report({ kind: "closed", message: "원격 데스크톱 연결이 종료되었습니다." });
@@ -223,6 +258,7 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
 
   const connect = useCallback(
     async (secret: string | null, saveSecret: boolean) => {
+      if (secret !== null) pendingTarget.current = { secret, save: saveSecret };
       const gen = ++generation.current;
       const current = () => generation.current === gen;
       setOverlay({ kind: "none" });
@@ -260,7 +296,16 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
 
       const size = desiredSize(profile, root.current);
       try {
-        const id = await api.rdpConnect({ profileId: profile.id, ...size, secret, saveSecret, events, frames });
+        const id = await api.rdpConnect({
+          profileId: profile.id,
+          ...size,
+          secret: pendingTarget.current?.secret ?? null,
+          saveSecret: pendingTarget.current?.save ?? false,
+          jumpSecrets: Object.keys(jumpSecrets.current).length > 0 ? { ...jumpSecrets.current } : null,
+          saveJumpSecrets: saveJumpSecrets.current,
+          events,
+          frames,
+        });
         if (!current()) {
           void api.sshClose(id);
           return;
@@ -268,7 +313,15 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
         session.current = id;
       } catch (e) {
         if (!current()) return;
-        if (isApiError(e) && e.code === "passwordRequired") {
+        if (isApiError(e) && (e.code === "jumpPasswordRequired" || e.code === "jumpPassphraseRequired") && e.profileId) {
+          setOverlay({
+            kind: "jumpSecret",
+            profileId: e.profileId,
+            name: e.message,
+            mode: e.code === "jumpPassphraseRequired" ? "passphrase" : "password",
+          });
+          report({ kind: "closed", message: "점프 호스트 비밀번호가 필요합니다" });
+        } else if (isApiError(e) && e.code === "passwordRequired") {
           setOverlay({ kind: "secret" });
           report({ kind: "closed", message: "비밀번호가 필요합니다" });
         } else {
@@ -278,6 +331,19 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
     },
     [profile, handleEvent, report, hidpiScale],
   );
+
+  /** 호스트 키·인증서 승인 대화상자의 응답 */
+  const respond = (accept: boolean) => {
+    setOverlay({ kind: "none" });
+    if (session.current) void api.sshHostKeyRespond(session.current, accept).catch(() => {});
+  };
+
+  const cancelPrompt = () => {
+    pendingTarget.current = null;
+    jumpSecrets.current = {};
+    setOverlay({ kind: "none" });
+    report({ kind: "closed", message: "연결 취소됨" });
+  };
 
   const disconnect = useCallback(() => {
     generation.current++;
@@ -635,7 +701,15 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
                     : ""}
             </p>
             {ended && overlay.kind === "none" && (
-              <button type="button" className="button button-secondary button-small" onClick={() => connect(null, false)}>
+              <button
+                type="button"
+                className="button button-secondary button-small"
+                onClick={() => {
+                  pendingTarget.current = null;
+                  jumpSecrets.current = {};
+                  void connect(null, false);
+                }}
+              >
                 다시 연결
               </button>
             )}
@@ -723,10 +797,47 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
           target={target}
           error={overlay.error}
           onSubmit={(secret, save) => void connect(secret, save)}
-          onCancel={() => {
-            setOverlay({ kind: "none" });
-            report({ kind: "closed", message: "연결 취소됨" });
+          onCancel={cancelPrompt}
+        />
+      )}
+      {active && overlay.kind === "jumpSecret" && (
+        <SecretPrompt
+          kind={overlay.mode}
+          name={`점프 호스트 ${overlay.name}`}
+          target={`${target} 경유`}
+          error={overlay.error}
+          onSubmit={(secret, save) => {
+            jumpSecrets.current[overlay.profileId] = secret;
+            saveJumpSecrets.current = save;
+            void connect(null, false);
           }}
+          onCancel={cancelPrompt}
+        />
+      )}
+      {active && overlay.kind === "hostKeyPrompt" && (
+        <HostKeyPrompt
+          name={`점프 호스트 (${profile.name} 경유)`}
+          host={overlay.event.host}
+          port={overlay.event.port}
+          algorithm={overlay.event.algorithm}
+          fingerprint={overlay.event.fingerprint}
+          onTrust={() => respond(true)}
+          onCancel={() => respond(false)}
+        />
+      )}
+      {active && overlay.kind === "hostKeyChanged" && (
+        <HostKeyChanged
+          name={`점프 호스트 (${profile.name} 경유)`}
+          host={overlay.event.host}
+          port={overlay.event.port}
+          algorithm={overlay.event.algorithm}
+          expectedFingerprint={overlay.event.expectedFingerprint}
+          actualFingerprint={overlay.event.actualFingerprint}
+          onReview={() => {
+            setOverlay({ kind: "none" });
+            onReviewKnownHosts(overlay.event.host, overlay.event.port);
+          }}
+          onClose={() => setOverlay({ kind: "none" })}
         />
       )}
       {active && overlay.kind === "certPrompt" && (
@@ -736,14 +847,8 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onImmersi
           port={overlay.event.port}
           fingerprint={overlay.event.fingerprint}
           problem={overlay.event.problem}
-          onTrust={() => {
-            setOverlay({ kind: "none" });
-            if (session.current) void api.sshHostKeyRespond(session.current, true).catch(() => {});
-          }}
-          onCancel={() => {
-            setOverlay({ kind: "none" });
-            if (session.current) void api.sshHostKeyRespond(session.current, false).catch(() => {});
-          }}
+          onTrust={() => respond(true)}
+          onCancel={() => respond(false)}
         />
       )}
       {active && overlay.kind === "certChanged" && (

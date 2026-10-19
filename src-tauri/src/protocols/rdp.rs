@@ -35,6 +35,7 @@ use ironrdp::session::image::DecodedImage;
 use ironrdp::session::{ActiveStage, ActiveStageBuilder, ActiveStageOutput, SessionError};
 use ironrdp_tokio::{FramedWrite as _, NetworkClient};
 use secrecy::{ExposeSecret as _, SecretString};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use x509_cert::der::Decode as _;
@@ -78,7 +79,7 @@ impl RdpTarget {
     }
 
     /// 대괄호로 감싼 IPv6 주소를 벗깁니다.
-    fn bare_host(&self) -> &str {
+    pub fn bare_host(&self) -> &str {
         self.host
             .strip_prefix('[')
             .and_then(|h| h.strip_suffix(']'))
@@ -265,7 +266,61 @@ impl NetworkClient for NoKdc {
     }
 }
 
-type TlsStream = tokio_rustls::client::TlsStream<TcpStream>;
+/// RDP가 지나가는 전송 스트림: TCP 직접 연결 또는 SSH 터널(점프 호스트)과 이어진 메모리 파이프
+///
+/// 트레이트 객체(`Box<dyn …>`) 대신 열거형을 써서 tokio::spawn의 `Send` 증명이 단순하게 되도록 합니다.
+pub enum Transport {
+    Tcp(TcpStream),
+    Tunnel(tokio::io::DuplexStream),
+}
+
+impl AsyncRead for Transport {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Transport::Tcp(s) => std::pin::Pin::new(s).poll_read(cx, buf),
+            Transport::Tunnel(s) => std::pin::Pin::new(s).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for Transport {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            Transport::Tcp(s) => std::pin::Pin::new(s).poll_write(cx, buf),
+            Transport::Tunnel(s) => std::pin::Pin::new(s).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Transport::Tcp(s) => std::pin::Pin::new(s).poll_flush(cx),
+            Transport::Tunnel(s) => std::pin::Pin::new(s).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            Transport::Tcp(s) => std::pin::Pin::new(s).poll_shutdown(cx),
+            Transport::Tunnel(s) => std::pin::Pin::new(s).poll_shutdown(cx),
+        }
+    }
+}
+
+type TlsStream = tokio_rustls::client::TlsStream<Transport>;
 type Framed<S> = ironrdp_tokio::TokioFramed<S>;
 
 /// 활성화까지 마친 연결
@@ -374,16 +429,26 @@ impl RdpConnection {
     ///
     /// `pinned`는 사용자가 이전에 승인한 인증서 지문입니다. 인증서를 신뢰할 수 없으면
     /// [`RdpError::CertUntrusted`]를 돌려주어 세션이 사용자에게 묻게 합니다.
+    ///
+    /// `tunnel`이 있으면 TCP 대신 그 스트림(SSH 터널) 위에서 접속합니다. TLS 검증과 NLA는 그대로입니다.
     pub async fn connect(
         target: &RdpTarget,
         password: &SecretString,
         pinned: Option<String>,
         size: DisplaySize,
         clipboard: bool,
+        tunnel: Option<tokio::io::DuplexStream>,
     ) -> Result<Self, RdpError> {
         tokio::time::timeout(
             HANDSHAKE_TIMEOUT,
-            Self::connect_inner(target, password, pinned, size.normalized(), clipboard),
+            Self::connect_inner(
+                target,
+                password,
+                pinned,
+                size.normalized(),
+                clipboard,
+                tunnel,
+            ),
         )
         .await
         .map_err(|_| RdpError::Timeout)?
@@ -395,16 +460,28 @@ impl RdpConnection {
         pinned: Option<String>,
         size: DisplaySize,
         clipboard: bool,
+        tunnel: Option<tokio::io::DuplexStream>,
     ) -> Result<Self, RdpError> {
         let host = target.bare_host();
-        let stream = tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect((host, target.port)))
-            .await
-            .map_err(|_| RdpError::Timeout)?
-            .map_err(|e| RdpError::Connect(e.to_string()))?;
-        let _ = stream.set_nodelay(true);
-        let client_addr = stream
-            .local_addr()
-            .map_err(|e| RdpError::Connect(e.to_string()))?;
+        let (stream, client_addr) = match tunnel {
+            // 터널은 로컬 주소가 없으므로 서버에 보내는 클라이언트 주소는 루프백으로 둡니다.
+            Some(tunnel) => (
+                Transport::Tunnel(tunnel),
+                std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
+            ),
+            None => {
+                let stream =
+                    tokio::time::timeout(CONNECT_TIMEOUT, TcpStream::connect((host, target.port)))
+                        .await
+                        .map_err(|_| RdpError::Timeout)?
+                        .map_err(|e| RdpError::Connect(e.to_string()))?;
+                let _ = stream.set_nodelay(true);
+                let client_addr = stream
+                    .local_addr()
+                    .map_err(|e| RdpError::Connect(e.to_string()))?;
+                (Transport::Tcp(stream), client_addr)
+            }
+        };
 
         let drdynvc = DrdynvcClient::new()
             .with_dynamic_channel(DisplayControlClient::new(|_| Ok(Vec::new())));

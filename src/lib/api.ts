@@ -239,6 +239,8 @@ export const api = {
     scale: number;
     secret: string | null;
     saveSecret: boolean;
+    jumpSecrets: Record<string, string> | null;
+    saveJumpSecrets: boolean;
     events: Channel<SessionEvent>;
     frames: Channel<ArrayBuffer>;
   }) => invoke<string>("rdp_connect", args),

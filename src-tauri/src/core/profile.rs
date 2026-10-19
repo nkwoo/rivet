@@ -166,7 +166,7 @@ pub struct Profile {
     pub favorite: bool,
     /// RDP 프로필의 화면 설정 (다른 프로토콜은 `None`)
     pub rdp: Option<RdpSettings>,
-    /// 점프 호스트로 쓸 SSH 프로필 ID (SSH/SFTP 프로필만)
+    /// 점프 호스트로 쓸 SSH 프로필 ID (SSH/SFTP는 경유 접속, RDP는 SSH 터널 경유)
     pub jump_profile_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
@@ -244,7 +244,12 @@ impl ProfileInput {
             if self.auth_method == AuthMethod::Key && self.key_path.is_none() {
                 return Err(Error::Invalid("key file is required for key auth".into()));
             }
-        } else {
+        }
+        // 점프 호스트는 SSH/SFTP와 RDP(SSH 터널 경유)만 사용
+        if !matches!(
+            self.protocol,
+            Protocol::Ssh | Protocol::Sftp | Protocol::Rdp
+        ) {
             self.jump_profile_id = None;
         }
         if self.protocol == Protocol::Rdp {
