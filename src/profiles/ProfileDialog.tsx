@@ -10,6 +10,7 @@ import {
   type Profile,
   type ProfileInput,
   type Protocol,
+  type RdpSettings,
 } from "../lib/api.ts";
 
 const PROTOCOLS: Protocol[] = ["ssh", "sftp", "ftp", "ftps", "rdp"];
@@ -17,6 +18,23 @@ const AUTH_LABELS: Record<AuthMethod, string> = {
   key: "개인 키",
   password: "비밀번호",
   agent: "ssh-agent",
+};
+
+const RESOLUTIONS: [number, number][] = [
+  [1280, 720],
+  [1366, 768],
+  [1600, 900],
+  [1920, 1080],
+  [2560, 1440],
+];
+const SCALES = [100, 125, 150, 175, 200];
+const DEFAULT_RDP: RdpSettings = {
+  width: null,
+  height: null,
+  scale: null,
+  hidpi: false,
+  keyboard: "remote",
+  hangulKey: "lang1",
 };
 
 interface ProfileDialogProps {
@@ -46,6 +64,7 @@ function initialInput(p: Profile | null): ProfileInput {
     tags: [],
     notes: "",
     favorite: false,
+    rdp: null,
   };
 }
 
@@ -79,6 +98,8 @@ export function ProfileDialog({ profile, groups, onSave, onDelete, onForgetSecre
   };
 
   const isSsh = form.protocol === "ssh" || form.protocol === "sftp";
+  const rdp = { ...DEFAULT_RDP, ...form.rdp };
+  const setRdp = (patch: Partial<RdpSettings>) => set("rdp", { ...rdp, ...patch });
 
   const submit = async (e: FormEvent, connect: boolean) => {
     e.preventDefault();
@@ -94,7 +115,16 @@ export function ProfileDialog({ profile, groups, onSave, onDelete, onForgetSecre
         .split(",")
         .map((t) => t.trim())
         .filter(Boolean);
-      await onSave({ ...form, port, tags, keyPath: form.authMethod === "key" ? form.keyPath : null }, connect);
+      await onSave(
+        {
+          ...form,
+          port,
+          tags,
+          keyPath: form.authMethod === "key" ? form.keyPath : null,
+          rdp: form.protocol === "rdp" ? rdp : null,
+        },
+        connect,
+      );
     } catch (err) {
       setError(errorMessage(err));
       setBusy(false);
@@ -161,11 +191,9 @@ export function ProfileDialog({ profile, groups, onSave, onDelete, onForgetSecre
           <button type="submit" form="profile-form" className="button button-secondary" disabled={busy}>
             저장
           </button>
-          {form.protocol !== "rdp" && (
-            <button type="button" className="button button-primary" disabled={busy} onClick={(e) => submit(e, true)}>
-              저장 후 연결
-            </button>
-          )}
+          <button type="button" className="button button-primary" disabled={busy} onClick={(e) => submit(e, true)}>
+            저장 후 연결
+          </button>
         </>
       }
     >
@@ -186,7 +214,10 @@ export function ProfileDialog({ profile, groups, onSave, onDelete, onForgetSecre
             ))}
           </div>
           {form.protocol === "rdp" && (
-            <p className="hint">RDP는 아직 연결할 수 없습니다. 프로필은 저장해 두었다가 이후 버전에서 사용할 수 있습니다.</p>
+            <p className="hint">
+              NLA(CredSSP)로 인증합니다. 사용자명은 <code className="mono">DOMAIN\user</code> 또는{" "}
+              <code className="mono">user@domain</code> 형식도 됩니다. 서버 인증서는 지문을 확인한 뒤 고정합니다.
+            </p>
           )}
           {form.protocol === "ftps" && (
             <p className="hint">
@@ -294,6 +325,76 @@ export function ProfileDialog({ profile, groups, onSave, onDelete, onForgetSecre
               </label>
             )}
           </>
+        )}
+
+        {form.protocol === "rdp" && (
+          <div className="grid-4">
+            <label className="field span-2">
+              <span className="label">해상도</span>
+              <select
+                value={rdp.width && rdp.height ? `${rdp.width}x${rdp.height}` : "fit"}
+                onChange={(e) => {
+                  const [w, h] = e.target.value.split("x").map(Number);
+                  setRdp(w && h ? { width: w, height: h, hidpi: false } : { width: null, height: null });
+                }}
+              >
+                <option value="fit">창에 맞춤 (탭 크기를 따라 바뀜)</option>
+                {RESOLUTIONS.map(([w, h]) => (
+                  <option key={`${w}x${h}`} value={`${w}x${h}`}>
+                    {w} × {h}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field span-2">
+              <span className="label">원격 화면 배율</span>
+              <select
+                value={rdp.scale === null ? "auto" : String(rdp.scale)}
+                onChange={(e) => setRdp({ scale: e.target.value === "auto" ? null : Number(e.target.value) })}
+              >
+                <option value="auto">자동</option>
+                {SCALES.map((v) => (
+                  <option key={v} value={v}>
+                    {v}%
+                  </option>
+                ))}
+              </select>
+            </label>
+            {rdp.width === null && (
+              <label className="checkbox span-4">
+                <input type="checkbox" checked={rdp.hidpi} onChange={(e) => setRdp({ hidpi: e.target.checked })} />
+                <span>고해상도(Retina) 디스플레이의 실제 픽셀로 접속 (선명하지만 전송량이 늘어납니다)</span>
+              </label>
+            )}
+            <label className="field span-2">
+              <span className="label">키보드 입력 방식</span>
+              <select
+                value={rdp.keyboard}
+                onChange={(e) => setRdp({ keyboard: e.target.value === "local" ? "local" : "remote" })}
+              >
+                <option value="remote">원격 입력기 (한/영은 원격에서 전환)</option>
+                <option value="local">맥 입력기 (한/영은 맥에서 전환)</option>
+              </select>
+            </label>
+            {rdp.keyboard === "remote" && (
+              <label className="field span-2">
+                <span className="label">원격 한/영 전환 키</span>
+                <select
+                  value={rdp.hangulKey}
+                  onChange={(e) => setRdp({ hangulKey: e.target.value as RdpSettings["hangulKey"] })}
+                >
+                  <option value="lang1">한/영 키</option>
+                  <option value="rightAlt">오른쪽 Alt</option>
+                  <option value="shiftSpace">Shift+Space</option>
+                </select>
+              </label>
+            )}
+            <p className="hint span-4">
+              {rdp.keyboard === "local"
+                ? "맥 입력기가 글자를 완성한 뒤 원격에 보냅니다. 조합 중인 글자는 마지막으로 클릭한 위치에 미리 보여 줍니다."
+                : "키를 그대로 보내 Windows 입력기가 조합하므로 자음·모음이 바로 보입니다. 원격 한/영 전환은 툴바의 한/영 버튼이나 오른쪽 ⌘로 합니다. Windows 입력기 설정에 맞는 전환 키를 고르세요."}
+            </p>
+          </div>
         )}
 
         <div className="grid-4">

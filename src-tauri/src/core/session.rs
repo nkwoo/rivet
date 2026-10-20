@@ -7,10 +7,13 @@
 //! 인증된 연결은 슬롯에 보관해 파일 탐색기가 같은 연결 위에 SFTP 채널을 열 수 있게 합니다.
 //! SFTP 프로필은 셸 없이 연결만 유지합니다.
 //!
-//! FTP/FTPS 세션은 셸이 없고 파일 시스템(`FtpFs`)만 보관합니다. FTPS 인증서를 OS가 신뢰하지
-//! 않으면 고정 지문과 비교해 바뀐 인증서는 차단하고, 처음 보는 인증서는 사용자 승인을 받습니다.
+//! FTP/FTPS 세션은 셸이 없고 파일 시스템(`FtpFs`)만 보관합니다. FTPS와 RDP는 서버 인증서를 OS가
+//! 신뢰하지 않으면 고정 지문과 비교해 바뀐 인증서는 차단하고, 처음 보는 인증서는 사용자 승인을 받습니다.
+//!
+//! RDP 세션은 화면 갱신을 바이너리 출력으로, 클립보드 공유 알림을 이벤트로 내보냅니다.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Duration;
@@ -28,6 +31,11 @@ use crate::core::profile::{AuthMethod, Profile, Protocol};
 use crate::core::secrets::SecretStore;
 use crate::error::{Error, Result};
 use crate::protocols::ftp::{self, FtpConnectionInfo, FtpError, FtpFs, FtpSecurity, FtpTarget};
+use crate::protocols::rdp::clipboard::LocalClipboard;
+use crate::protocols::rdp::{
+    ClipboardDirection, DisplaySize, RdpCommand, RdpConnection, RdpConnectionInfo, RdpError,
+    RdpOutput, RdpTarget,
+};
 use crate::protocols::sftp::SftpFs;
 use crate::protocols::ssh::{
     load_private_key, ConnectionInfo, HostKeyVerdict, HostKeyVerifier, ShellCommand, SshAuth,
@@ -91,6 +99,11 @@ pub enum SessionEvent {
         #[serde(flatten)]
         info: ConnectionInfo,
     },
+    /// RDP 텍스트 클립보드를 주고받음 (`toRemote` / `toLocal`)
+    Clipboard {
+        direction: String,
+        chars: usize,
+    },
     Closed {
         exit_status: Option<u32>,
     },
@@ -104,6 +117,11 @@ pub enum SessionEvent {
 pub trait SessionSink: Send + Sync + 'static {
     fn output(&self, data: &[u8]);
     fn event(&self, event: SessionEvent);
+
+    /// 큰 출력(RDP 화면)을 복사 없이 넘길 때 씁니다.
+    fn output_owned(&self, data: Vec<u8>) {
+        self.output(&data);
+    }
 }
 
 /// SSH 세션 시작 요청
@@ -251,6 +269,74 @@ pub fn prepare_ftp_request(
     })
 }
 
+/// RDP 세션 시작 요청
+pub struct RdpSessionRequest {
+    pub target: RdpTarget,
+    pub password: SecretString,
+    pub size: DisplaySize,
+    pub clipboard: bool,
+    pub on_authenticated: Option<Box<dyn FnOnce() + Send>>,
+}
+
+/// 프로필로 RDP 세션 요청을 만듭니다. 비밀번호가 없으면 `PasswordRequired`를 돌려줍니다.
+pub fn prepare_rdp_request(
+    profile: &Profile,
+    provided_secret: Option<SecretString>,
+    save_secret: bool,
+    secrets: Arc<dyn SecretStore>,
+    size: DisplaySize,
+) -> Result<RdpSessionRequest> {
+    if profile.protocol != Protocol::Rdp {
+        return Err(Error::Invalid("profile is not an RDP profile".into()));
+    }
+    let from_user = provided_secret.is_some();
+    let password = match provided_secret {
+        Some(s) => s,
+        None => secrets.get(&profile.id)?.ok_or(Error::PasswordRequired)?,
+    };
+    let on_authenticated: Option<Box<dyn FnOnce() + Send>> = if from_user && save_secret {
+        let (id, secret) = (profile.id.clone(), password.clone());
+        Some(Box::new(move || {
+            if let Err(e) = secrets.set(&id, &secret) {
+                tracing::warn!(error = %e, "could not save secret to keychain");
+            }
+        }))
+    } else {
+        None
+    };
+    Ok(RdpSessionRequest {
+        target: RdpTarget {
+            host: profile.host.clone(),
+            port: profile.port,
+            username: profile.username.clone(),
+        },
+        password,
+        size: size.normalized(),
+        clipboard: true,
+        on_authenticated,
+    })
+}
+
+fn rdp_connection_info(info: &RdpConnectionInfo) -> ConnectionInfo {
+    let auth = if info.nla {
+        "NLA (CredSSP)"
+    } else {
+        "원격 로그인 화면"
+    };
+    ConnectionInfo {
+        transport: if info.trust == CertTrust::Pinned {
+            "tlsPinned"
+        } else {
+            "tlsCa"
+        }
+        .into(),
+        kex: format!("RDP {} · {auth}", info.tls_version),
+        cipher: String::new(),
+        host_key_algorithm: "X.509".into(),
+        fingerprint: info.fingerprint.clone(),
+    }
+}
+
 fn ftp_connection_info(info: &FtpConnectionInfo) -> ConnectionInfo {
     let (transport, kex) = match (info.security, info.trust) {
         (FtpSecurity::Plain, _) => ("plain", "FTP"),
@@ -301,8 +387,14 @@ fn expand_home(path: &str) -> PathBuf {
     }
 }
 
+/// 세션 종류별 명령 채널
+enum Commands {
+    Shell(mpsc::Sender<ShellCommand>),
+    Rdp(mpsc::Sender<RdpCommand>),
+}
+
 struct Slot {
-    commands: mpsc::Sender<ShellCommand>,
+    commands: Commands,
     host_key_reply: Option<oneshot::Sender<bool>>,
     task: Option<AbortHandle>,
     /// 인증이 끝난 뒤 채워짐
@@ -312,7 +404,7 @@ struct Slot {
 }
 
 impl Slot {
-    fn new(commands: mpsc::Sender<ShellCommand>) -> Self {
+    fn new(commands: Commands) -> Self {
         Self {
             commands,
             host_key_reply: None,
@@ -356,7 +448,8 @@ impl SessionManager {
     ) -> SessionId {
         let id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = mpsc::channel(COMMAND_QUEUE);
-        self.slots().insert(id.clone(), Slot::new(tx));
+        self.slots()
+            .insert(id.clone(), Slot::new(Commands::Shell(tx)));
 
         let verifier = Arc::new(InteractiveVerifier {
             store: known_hosts,
@@ -386,15 +479,63 @@ impl SessionManager {
     }
 
     pub async fn send(&self, id: &str, command: ShellCommand) -> Result<()> {
-        let sender = self
-            .slots()
-            .get(id)
-            .map(|s| s.commands.clone())
-            .ok_or_else(|| Error::NotFound(format!("session {id}")))?;
+        let sender = match self.slots().get(id).map(|s| &s.commands) {
+            Some(Commands::Shell(tx)) => tx.clone(),
+            Some(Commands::Rdp(_)) => return Err(Error::Invalid("not a shell session".into())),
+            None => return Err(Error::NotFound(format!("session {id}"))),
+        };
         sender
             .send(command)
             .await
             .map_err(|_| Error::NotFound(format!("session {id}")))
+    }
+
+    /// RDP 세션에 명령을 보냅니다.
+    pub async fn send_rdp(&self, id: &str, command: RdpCommand) -> Result<()> {
+        let sender = match self.slots().get(id).map(|s| &s.commands) {
+            Some(Commands::Rdp(tx)) => tx.clone(),
+            Some(Commands::Shell(_)) => return Err(Error::Invalid("not an RDP session".into())),
+            None => return Err(Error::NotFound(format!("session {id}"))),
+        };
+        sender
+            .send(command)
+            .await
+            .map_err(|_| Error::NotFound(format!("session {id}")))
+    }
+
+    /// RDP 세션을 백그라운드에서 시작하고 즉시 ID를 돌려줍니다.
+    pub fn spawn_rdp(
+        self: &Arc<Self>,
+        request: RdpSessionRequest,
+        pins: Arc<CertPinStore>,
+        sink: Arc<dyn SessionSink>,
+        clipboard: Arc<dyn LocalClipboard>,
+    ) -> SessionId {
+        let id = uuid::Uuid::new_v4().to_string();
+        let (tx, rx) = mpsc::channel(COMMAND_QUEUE);
+        self.slots()
+            .insert(id.clone(), Slot::new(Commands::Rdp(tx)));
+        let manager = Arc::downgrade(self);
+        let session_id = id.clone();
+        let task = tokio::spawn(async move {
+            run_rdp_session(
+                request,
+                pins,
+                manager.clone(),
+                session_id.clone(),
+                rx,
+                sink,
+                clipboard,
+            )
+            .await;
+            if let Some(m) = manager.upgrade() {
+                m.slots().remove(&session_id);
+            }
+        });
+        if let Some(slot) = self.slots().get_mut(&id) {
+            slot.task = Some(task.abort_handle());
+        }
+        id
     }
 
     /// 호스트 키 승인 대화상자의 응답을 전달합니다.
@@ -417,7 +558,8 @@ impl SessionManager {
     ) -> SessionId {
         let id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = mpsc::channel(COMMAND_QUEUE);
-        self.slots().insert(id.clone(), Slot::new(tx));
+        self.slots()
+            .insert(id.clone(), Slot::new(Commands::Shell(tx)));
         let manager = Arc::downgrade(self);
         let session_id = id.clone();
         let task = tokio::spawn(async move {
@@ -619,7 +761,99 @@ async fn run_ftp_session(
     }
 }
 
-/// FTP 접속. 신뢰할 수 없는 인증서는 고정 지문과 비교하거나 사용자 승인을 받습니다.
+/// TLS 접속 시도 결과
+enum TlsAttempt<T> {
+    Connected(T),
+    /// 인증서를 신뢰할 수 없음 (OS 검증 실패, 고정 지문 없음/다름)
+    Untrusted {
+        fingerprint: String,
+        problem: String,
+    },
+    Failed(Error),
+}
+
+/// 인증서 확인 실패를 프로토콜별 에러로 바꿀 때 쓰는 종류
+enum CertFailure {
+    Changed { expected: String, actual: String },
+    Rejected,
+    Tls(String),
+}
+
+/// TLS 접속. 신뢰할 수 없는 인증서는 고정 지문과 비교하거나 사용자 승인을 받습니다(TOFU).
+///
+/// `attempt`는 고정 지문을 받아 한 번 접속해 봅니다. 처음 보는 인증서를 사용자가 승인하면
+/// 지문을 고정하고 한 번 더 접속합니다. 고정과 다른 인증서는 묻지 않고 차단합니다.
+#[allow(clippy::too_many_arguments)]
+async fn connect_pinned<T, Fut>(
+    host: &str,
+    port: u16,
+    pins: &CertPinStore,
+    manager: &Weak<SessionManager>,
+    id: &str,
+    sink: &Arc<dyn SessionSink>,
+    mut attempt: impl FnMut(Option<String>) -> Fut,
+    failure: impl Fn(CertFailure) -> Error,
+) -> Result<T>
+where
+    Fut: Future<Output = TlsAttempt<T>>,
+{
+    for _ in 0..2 {
+        let pinned = pins.pinned(host, port)?;
+        let (fingerprint, problem) = match attempt(pinned).await {
+            TlsAttempt::Connected(conn) => return Ok(conn),
+            TlsAttempt::Untrusted {
+                fingerprint,
+                problem,
+            } => (fingerprint, problem),
+            TlsAttempt::Failed(e) => return Err(e),
+        };
+        match pins.check(host, port, &fingerprint)? {
+            PinStatus::Changed { known } => {
+                tracing::warn!(host, port, "certificate changed; connection blocked");
+                sink.event(SessionEvent::CertChanged {
+                    host: host.to_owned(),
+                    port,
+                    expected_fingerprint: known.fingerprint.clone(),
+                    actual_fingerprint: fingerprint.clone(),
+                });
+                return Err(failure(CertFailure::Changed {
+                    expected: known.fingerprint,
+                    actual: fingerprint,
+                }));
+            }
+            // 고정 지문과 같은데도 거부됨 (서명 오류 등)
+            PinStatus::Pinned => {
+                return Err(failure(CertFailure::Tls(format!(
+                    "certificate rejected ({problem})"
+                ))))
+            }
+            PinStatus::Unknown => {
+                let (tx, rx) = oneshot::channel();
+                let registered = manager
+                    .upgrade()
+                    .is_some_and(|m| m.set_host_key_reply(id, tx));
+                if !registered {
+                    return Err(failure(CertFailure::Rejected));
+                }
+                sink.event(SessionEvent::CertPrompt {
+                    host: host.to_owned(),
+                    port,
+                    fingerprint: fingerprint.clone(),
+                    problem,
+                });
+                match tokio::time::timeout(HOST_KEY_PROMPT_TIMEOUT, rx).await {
+                    Ok(Ok(true)) => pins.pin(host, port, &fingerprint)?,
+                    _ => return Err(failure(CertFailure::Rejected)),
+                }
+            }
+        }
+    }
+    Err(failure(CertFailure::Tls(
+        "certificate is still not trusted".into(),
+    )))
+}
+
+/// FTP 접속 (FTPS 인증서 확인 포함)
 async fn connect_ftp(
     target: &FtpTarget,
     password: &SecretString,
@@ -628,59 +862,144 @@ async fn connect_ftp(
     id: &str,
     sink: &Arc<dyn SessionSink>,
 ) -> Result<FtpFs> {
-    // 첫 시도에서 승인받으면 고정 지문을 넣어 한 번 더 연결합니다.
-    for _ in 0..2 {
-        let pinned = pins.pinned(&target.host, target.port)?;
-        let (fingerprint, problem) =
+    connect_pinned(
+        &target.host,
+        target.port,
+        pins,
+        manager,
+        id,
+        sink,
+        |pinned| async move {
             match FtpFs::connect(target.clone(), password.clone(), pinned).await {
-                Ok(fs) => return Ok(fs),
+                Ok(fs) => TlsAttempt::Connected(fs),
                 Err(FtpError::CertUntrusted {
                     fingerprint,
                     problem,
-                }) => (fingerprint, problem),
-                Err(e) => return Err(e.into()),
-            };
-        match pins.check(&target.host, target.port, &fingerprint)? {
-            PinStatus::Changed { known } => {
-                tracing::warn!(host = %target.host, port = target.port, "certificate changed; connection blocked");
-                sink.event(SessionEvent::CertChanged {
-                    host: target.host.clone(),
-                    port: target.port,
-                    expected_fingerprint: known.fingerprint.clone(),
-                    actual_fingerprint: fingerprint.clone(),
-                });
-                return Err(FtpError::CertChanged {
-                    expected: known.fingerprint,
-                    actual: fingerprint,
-                }
-                .into());
-            }
-            // 고정 지문과 같은데도 거부됨 (서명 오류 등)
-            PinStatus::Pinned => {
-                return Err(FtpError::Tls(format!("certificate rejected ({problem})")).into())
-            }
-            PinStatus::Unknown => {
-                let (tx, rx) = oneshot::channel();
-                let registered = manager
-                    .upgrade()
-                    .is_some_and(|m| m.set_host_key_reply(id, tx));
-                if !registered {
-                    return Err(FtpError::CertRejected.into());
-                }
-                sink.event(SessionEvent::CertPrompt {
-                    host: target.host.clone(),
-                    port: target.port,
-                    fingerprint: fingerprint.clone(),
+                }) => TlsAttempt::Untrusted {
+                    fingerprint,
                     problem,
-                });
-                match tokio::time::timeout(HOST_KEY_PROMPT_TIMEOUT, rx).await {
-                    Ok(Ok(true)) => pins.pin(&target.host, target.port, &fingerprint)?,
-                    _ => return Err(FtpError::CertRejected.into()),
-                }
+                },
+                Err(e) => TlsAttempt::Failed(e.into()),
             }
+        },
+        |f| {
+            match f {
+                CertFailure::Changed { expected, actual } => {
+                    FtpError::CertChanged { expected, actual }
+                }
+                CertFailure::Rejected => FtpError::CertRejected,
+                CertFailure::Tls(m) => FtpError::Tls(m),
+            }
+            .into()
+        },
+    )
+    .await
+}
+
+/// RDP 세션 출력을 [`SessionSink`]로 보냅니다.
+struct RdpSink(Arc<dyn SessionSink>);
+
+impl RdpOutput for RdpSink {
+    fn binary(&self, data: Vec<u8>) {
+        self.0.output_owned(data);
+    }
+
+    fn clipboard(&self, direction: ClipboardDirection, chars: usize) {
+        self.0.event(SessionEvent::Clipboard {
+            direction: match direction {
+                ClipboardDirection::ToRemote => "toRemote",
+                ClipboardDirection::ToLocal => "toLocal",
+            }
+            .into(),
+            chars,
+        });
+    }
+}
+
+async fn run_rdp_session(
+    request: RdpSessionRequest,
+    pins: Arc<CertPinStore>,
+    manager: Weak<SessionManager>,
+    id: SessionId,
+    mut commands: mpsc::Receiver<RdpCommand>,
+    sink: Arc<dyn SessionSink>,
+    clipboard: Arc<dyn LocalClipboard>,
+) {
+    let RdpSessionRequest {
+        target,
+        password,
+        size,
+        clipboard: share_clipboard,
+        on_authenticated,
+    } = request;
+
+    let result = async {
+        let conn = connect_pinned(
+            &target.host,
+            target.port,
+            &pins,
+            &manager,
+            &id,
+            &sink,
+            |pinned| {
+                let (target, password) = (&target, &password);
+                async move {
+                    match RdpConnection::connect(target, password, pinned, size, share_clipboard).await {
+                        Ok(conn) => TlsAttempt::Connected(conn),
+                        Err(RdpError::CertUntrusted {
+                            fingerprint,
+                            problem,
+                        }) => TlsAttempt::Untrusted {
+                            fingerprint,
+                            problem,
+                        },
+                        Err(e) => TlsAttempt::Failed(e.into()),
+                    }
+                }
+            },
+            |f| {
+                match f {
+                    CertFailure::Changed { expected, actual } => {
+                        RdpError::CertChanged { expected, actual }
+                    }
+                    CertFailure::Rejected => RdpError::CertRejected,
+                    CertFailure::Tls(m) => RdpError::Tls(m),
+                }
+                .into()
+            },
+        )
+        .await;
+        // 인증이 끝나면 비밀번호를 메모리에서 바로 지웁니다.
+        drop(password);
+        let conn = conn?;
+        tracing::info!(host = %target.host, port = target.port, nla = conn.info().nla, "rdp connected");
+        if let Some(callback) = on_authenticated {
+            callback();
+        }
+        if manager.upgrade().is_none() {
+            return Ok(());
+        }
+        sink.event(SessionEvent::Connected {
+            info: rdp_connection_info(conn.info()),
+        });
+        let out = RdpSink(sink.clone());
+        conn.run(&mut commands, &out, clipboard)
+            .await
+            .map_err(Error::from)
+    }
+    .await;
+
+    match result {
+        Ok(()) => sink.event(SessionEvent::Closed { exit_status: None }),
+        Err(e) => {
+            tracing::warn!(host = %target.host, port = target.port, code = e.code(), "rdp session failed");
+            sink.event(SessionEvent::Error {
+                code: e.code().into(),
+                message: e.to_string(),
+            });
+            sink.event(SessionEvent::Closed { exit_status: None });
         }
     }
-    Err(FtpError::Tls("certificate is still not trusted".into()).into())
 }
 
 /// 셸 없는 세션: 탭이 닫히거나 서버가 연결을 끊을 때까지 기다립니다.
@@ -783,6 +1102,7 @@ mod tests {
             tags: vec![],
             notes: String::new(),
             favorite: false,
+            rdp: None,
             created_at: 0,
             updated_at: 0,
         }
@@ -918,7 +1238,9 @@ mod tests {
             sink: sink.clone(),
         };
         let (tx, _rx) = mpsc::channel(1);
-        manager.slots().insert("s1".into(), Slot::new(tx));
+        manager
+            .slots()
+            .insert("s1".into(), Slot::new(Commands::Shell(tx)));
         let key = PublicKey::from_openssh(
             "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILivYAx9W//3gPpBQ8sYmjiLyHYjP1Ow9bzH+Vs7rGm6",
         )

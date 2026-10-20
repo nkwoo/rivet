@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rdp-frame-ack"
+description = "Enables the rdp_frame_ack command without any pre-configured scope."
+commands.allow = ["rdp_frame_ack"]
+
+[[permission]]
+identifier = "deny-rdp-frame-ack"
+description = "Denies the rdp_frame_ack command without any pre-configured scope."
+commands.deny = ["rdp_frame_ack"]

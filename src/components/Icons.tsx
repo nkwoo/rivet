@@ -139,3 +139,35 @@ export const TerminalIcon = () => (
     <path d="m7 9 3 3-3 3M13 15h4" />
   </svg>
 );
+
+export const MonitorIcon = ({ size = 16 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}>
+    <rect x="3" y="4" width="18" height="12" rx="2" />
+    <path d="M8 20h8M12 16v4" />
+  </svg>
+);
+
+export const FullscreenIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" {...base}>
+    <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+  </svg>
+);
+
+export const ExitFullscreenIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" {...base}>
+    <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />
+  </svg>
+);
+
+export const ClipboardIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" {...base}>
+    <rect x="7" y="4" width="10" height="4" rx="1" />
+    <path d="M7 6H5v15h14V6h-2" />
+  </svg>
+);
+
+export const CheckIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" {...base} strokeWidth={2.4}>
+    <path d="m5 12 5 5 9-10" />
+  </svg>
+);

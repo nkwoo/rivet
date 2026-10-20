@@ -10,6 +10,7 @@ import { ProfileDialog } from "./profiles/ProfileDialog.tsx";
 import { KnownHostsDialog } from "./security/KnownHostsDialog.tsx";
 import { TabBar, type TabInfo } from "./terminal/TabBar.tsx";
 import { TerminalTab, type TabState } from "./terminal/TerminalTab.tsx";
+import { RdpTab } from "./rdp/RdpTab.tsx";
 import { StatusBar } from "./StatusBar.tsx";
 
 export interface AppInfo {
@@ -30,6 +31,8 @@ export default function App() {
   const [profileDialog, setProfileDialog] = useState<ProfileDialogState>(null);
   const [knownHosts, setKnownHosts] = useState<KnownHostsState>(null);
   const [toast, setToast] = useState<string | null>(null);
+  /** RDP 전체 화면: 상단/사이드바/탭/상태 표시줄을 숨김 */
+  const [immersive, setImmersive] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const showToast = useCallback((message: string) => {
@@ -75,18 +78,11 @@ export default function App() {
     [tabs, tabStates],
   );
 
-  const openProfile = useCallback(
-    (profile: Profile) => {
-      if (profile.protocol === "rdp") {
-        showToast(`${profile.protocol.toUpperCase()} 연결은 아직 지원하지 않습니다.`);
-        return;
-      }
-      const id = crypto.randomUUID();
-      setTabs((t) => [...t, { id, profile }]);
-      setActiveTab(id);
-    },
-    [showToast],
-  );
+  const openProfile = useCallback((profile: Profile) => {
+    const id = crypto.randomUUID();
+    setTabs((t) => [...t, { id, profile }]);
+    setActiveTab(id);
+  }, []);
 
   const closeTab = (id: string) => {
     const index = tabs.findIndex((t) => t.id === id);
@@ -136,7 +132,7 @@ export default function App() {
   const activeState = activeTab ? (tabStates[activeTab] ?? null) : null;
 
   return (
-    <div className="app">
+    <div className={`app ${immersive ? "is-immersive" : ""}`}>
       <header className="topbar">
         <div className="brand">
           <RivetMark size={26} />
@@ -199,15 +195,26 @@ export default function App() {
                 <p className="muted">왼쪽 목록에서 연결을 선택하거나 새 연결을 추가하세요.</p>
               </div>
             )}
-            {tabs.map((t) => (
-              <TerminalTab
-                key={t.id}
-                profile={t.profile}
-                active={t.id === activeTab}
-                onState={(state) => setTabState(t.id, state)}
-                onReviewKnownHosts={(host, port) => setKnownHosts({ highlight: { host, port } })}
-              />
-            ))}
+            {tabs.map((t) =>
+              t.profile.protocol === "rdp" ? (
+                <RdpTab
+                  key={t.id}
+                  profile={t.profile}
+                  active={t.id === activeTab}
+                  onState={(state) => setTabState(t.id, state)}
+                  onReviewKnownHosts={(host, port) => setKnownHosts({ highlight: { host, port } })}
+                  onImmersive={setImmersive}
+                />
+              ) : (
+                <TerminalTab
+                  key={t.id}
+                  profile={t.profile}
+                  active={t.id === activeTab}
+                  onState={(state) => setTabState(t.id, state)}
+                  onReviewKnownHosts={(host, port) => setKnownHosts({ highlight: { host, port } })}
+                />
+              ),
+            )}
           </div>
         </main>
       </div>

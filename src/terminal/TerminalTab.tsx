@@ -13,7 +13,7 @@ import { FolderIcon, TerminalIcon } from "../components/Icons.tsx";
 
 export type TabState =
   | { kind: "connecting" }
-  | { kind: "connected"; info: ConnectionInfo }
+  | { kind: "connected"; info: ConnectionInfo; /** 상태 표시줄 오른쪽 부가 정보 (RDP 해상도·fps) */ detail?: string }
   | { kind: "closed"; message: string }
   | { kind: "error"; message: string };
 

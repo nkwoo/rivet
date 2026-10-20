@@ -1474,3 +1474,209 @@ textarea {
 .table .fingerprint {
   word-break: break-all;
 }
+
+/* ---------- RDP ---------- */
+
+/* 상단/상태 표시줄이 display:none이면 격자 칸에서 빠지므로, 남은 작업 영역이 한 줄 전체를 차지하게 함 */
+.app.is-immersive {
+  grid-template-rows: 1fr;
+}
+
+.app.is-immersive .topbar,
+.app.is-immersive .sidebar,
+.app.is-immersive .tabbar,
+.app.is-immersive .statusbar {
+  display: none;
+}
+
+.app.is-immersive .workspace {
+  grid-template-columns: 1fr;
+}
+
+.rdp-tab {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--graphite);
+}
+
+.rdp-tab[hidden],
+.rdp-canvas[hidden] {
+  display: none;
+}
+
+.rdp-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #090a0c;
+}
+
+.rdp-stage.is-scroll {
+  display: block;
+  overflow: auto;
+}
+
+.rdp-canvas {
+  display: block;
+  flex: none;
+  image-rendering: auto;
+  touch-action: none;
+  outline: none;
+}
+
+/* 키 입력과 IME 조합을 받는 입력란. 보이지 않지만 포커스는 받을 수 있어야 함 */
+.rdp-ime {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  resize: none;
+  pointer-events: none;
+}
+
+.rdp-placeholder {
+  position: absolute;
+  inset: 0;
+  color: var(--wire);
+  text-align: center;
+  padding: 24px;
+}
+
+.rdp-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 3;
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  padding: 6px;
+  background: #1a1d22;
+  border: 1px solid #343a43;
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  transition:
+    transform 160ms ease,
+    opacity 160ms ease;
+}
+
+.rdp-toolbar.is-hidden {
+  transform: translate(-50%, calc(-100% - 16px));
+  opacity: 0;
+}
+
+.rdp-toolbar-name {
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--text-soft);
+}
+
+.rdp-toolbar-sep {
+  width: 1px;
+  height: 22px;
+  margin: 0 4px;
+  background: #343a43;
+}
+
+.rdp-tool {
+  display: inline-grid;
+  place-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.rdp-tool.mono {
+  font-size: 12px;
+}
+
+.rdp-tool:hover {
+  background: #262b32;
+  color: var(--text);
+}
+
+.rdp-tool-icon {
+  width: 32px;
+  padding: 0;
+}
+
+.rdp-tool.is-on {
+  color: var(--wire);
+}
+
+.rdp-tool-danger {
+  border: 1px solid #5a3a2a;
+  color: var(--warn);
+}
+
+.rdp-tool-danger:hover {
+  background: #2a1e14;
+  color: var(--warn-text);
+}
+
+.rdp-tool:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 1px;
+}
+
+.rdp-toast {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #1a1d22;
+  border: 1px solid #343a43;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+}
+
+.rdp-toast svg {
+  color: var(--ok);
+}
+
+.rdp-diag {
+  flex-basis: 100%;
+  padding: 4px 10px 2px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* 맥 입력기로 조합 중인 글자 미리보기 (원격에는 조합이 끝난 뒤 전송) */
+.rdp-preedit {
+  position: absolute;
+  z-index: 2;
+  padding: 2px 8px;
+  background: #1a1d22;
+  border: 1px solid var(--wire);
+  border-radius: 6px;
+  font-size: 15px;
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  pointer-events: none;
+  white-space: pre;
+}

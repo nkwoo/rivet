@@ -53,6 +53,10 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (host, port)
     );
     "#,
+    // v3: RDP 화면 설정 (JSON, RDP 프로필만 사용)
+    r#"
+    ALTER TABLE profiles ADD COLUMN rdp_settings TEXT;
+    "#,
 ];
 
 /// 앱 전체가 공유하는 SQLite 연결.

@@ -7,13 +7,13 @@ SSH, 파일 전송, 원격 데스크톱을 하나의 창에. macOS와 Windows용
 - **RDP** — 윈도우 서버 원격 데스크톱
 - **연결 프로필** — 비밀번호는 OS 보안 저장소(macOS 키체인, Windows 자격 증명 관리자)에만 저장
 
-> 현재 개발 초기 단계입니다. SSH 터미널과 연결 프로필이 동작하며, 파일 전송과 RDP는 개발 중입니다.
+> 현재 개발 초기 단계입니다. SSH 터미널, SFTP/FTP/FTPS 파일 전송, 연결 프로필이 동작하며, RDP는 실제 Windows 환경 확인 중입니다.
 
 ## 개발 환경
 
 | 도구 | 버전 |
 |---|---|
-| Rust | `rust-toolchain.toml`로 고정 (MSRV 1.90) |
+| Rust | `rust-toolchain.toml`로 고정 (MSRV 1.94) |
 | Node.js | 22 이상 |
 | 플랫폼 요구사항 | [Tauri 2 사전 준비](https://v2.tauri.app/start/prerequisites/) (macOS: Xcode CLT, Windows: MSVC 빌드 도구 + WebView2) |
 

@@ -64,7 +64,12 @@ export function StatusBar({ app, state }: StatusBarProps) {
           {state.message}
         </span>
       )}
-      <span className="statusbar-end muted">{app ? `${app.name} ${app.version}` : "Rivet"}</span>
+      {state?.kind === "connected" && state.detail && (
+        <span className="statusbar-end mono">{state.detail}</span>
+      )}
+      <span className={`muted ${state?.kind === "connected" && state.detail ? "" : "statusbar-end"}`}>
+        {app ? `${app.name} ${app.version}` : "Rivet"}
+      </span>
     </footer>
   );
 }
