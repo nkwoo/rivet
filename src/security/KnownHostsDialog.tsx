@@ -3,6 +3,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { Dialog } from "../components/Dialog.tsx";
 import { ShieldAlertIcon } from "../components/Icons.tsx";
 import { api, errorMessage, type CertPin, type KnownHost } from "../lib/api.ts";
+import { useI18n } from "../i18n/index.ts";
 
 interface KnownHostsDialogProps {
   /** 키/인증서 변경 경고에서 열었을 때 강조할 호스트 */
@@ -15,6 +16,7 @@ type Pending = { kind: "host" | "pin"; host: string; port: number };
 
 /** 신뢰한 SSH 호스트 키와 고정한 TLS 인증서 관리 */
 export function KnownHostsDialog({ highlight, onClose }: KnownHostsDialogProps) {
+  const { m, locale } = useI18n();
   const [hosts, setHosts] = useState<KnownHost[] | null>(null);
   const [pins, setPins] = useState<CertPin[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,30 +51,29 @@ export function KnownHostsDialog({ highlight, onClose }: KnownHostsDialogProps) 
     highlight !== undefined && h.host === highlight.host.toLowerCase() && h.port === highlight.port;
 
   if (pending) {
-    const what = pending.kind === "host" ? "저장된 호스트 키" : "고정한 인증서";
+    const host = pending.kind === "host";
     return (
       <ConfirmDialog
-        title={`${what} 삭제`}
-        confirmLabel="삭제"
+        title={host ? m.knownHosts.deleteHostTitle : m.knownHosts.deletePinTitle}
+        confirmLabel={m.common.delete}
         onConfirm={() => void remove(pending)}
         onCancel={() => setPending(null)}
       >
         <p className="dialog-text">
+          {(host ? m.knownHosts.deleteHostConfirm : m.knownHosts.deletePinConfirm)[0]}
           <span className="mono">
             {pending.host}:{pending.port}
           </span>
-          의 {what}를 삭제할까요?
+          {(host ? m.knownHosts.deleteHostConfirm : m.knownHosts.deletePinConfirm)[1]}
         </p>
-        <p className="dialog-text muted">
-          다음 연결 때 {pending.kind === "host" ? "새 지문" : "인증서 지문"}을 다시 확인해야 합니다.
-        </p>
+        <p className="dialog-text muted">{host ? m.knownHosts.deleteHostHint : m.knownHosts.deletePinHint}</p>
       </ConfirmDialog>
     );
   }
 
   return (
     <Dialog
-      title="저장된 호스트 키와 인증서"
+      title={m.app.knownHosts}
       icon={
         <span className="dialog-icon dialog-icon-info">
           <ShieldAlertIcon />
@@ -82,7 +83,7 @@ export function KnownHostsDialog({ highlight, onClose }: KnownHostsDialogProps) 
       wide
       footer={
         <button type="button" className="button button-ghost" onClick={onClose} data-autofocus>
-          닫기
+          {m.common.close}
         </button>
       }
     >
@@ -91,18 +92,18 @@ export function KnownHostsDialog({ highlight, onClose }: KnownHostsDialogProps) 
           {error}
         </p>
       )}
-      <h3 className="dialog-section">SSH 호스트 키</h3>
+      <h3 className="dialog-section">{m.knownHosts.sshKeys}</h3>
       {hosts === null ? (
-        <p className="muted">불러오는 중…</p>
+        <p className="muted">{m.common.loading}</p>
       ) : hosts.length === 0 ? (
-        <p className="muted">아직 신뢰한 서버가 없습니다.</p>
+        <p className="muted">{m.knownHosts.noHosts}</p>
       ) : (
         <table className="table">
           <thead>
             <tr>
-              <th>호스트</th>
-              <th>키</th>
-              <th>저장일</th>
+              <th>{m.common.host}</th>
+              <th>{m.knownHosts.key}</th>
+              <th>{m.knownHosts.added}</th>
               <th />
             </tr>
           </thead>
@@ -116,14 +117,14 @@ export function KnownHostsDialog({ highlight, onClose }: KnownHostsDialogProps) 
                   <div>{h.algorithm}</div>
                   <div className="fingerprint muted">{h.fingerprint}</div>
                 </td>
-                <td>{new Date(h.addedAt * 1000).toLocaleDateString()}</td>
+                <td>{new Date(h.addedAt * 1000).toLocaleDateString(locale)}</td>
                 <td>
                   <button
                     type="button"
                     className="button button-small button-danger-outline"
                     onClick={() => setPending({ kind: "host", host: h.host, port: h.port })}
                   >
-                    삭제
+                    {m.common.delete}
                   </button>
                 </td>
               </tr>
@@ -132,18 +133,18 @@ export function KnownHostsDialog({ highlight, onClose }: KnownHostsDialogProps) 
         </table>
       )}
 
-      <h3 className="dialog-section">고정한 TLS 인증서 (FTPS)</h3>
+      <h3 className="dialog-section">{m.knownHosts.pins}</h3>
       {pins === null ? (
-        <p className="muted">불러오는 중…</p>
+        <p className="muted">{m.common.loading}</p>
       ) : pins.length === 0 ? (
-        <p className="muted">고정한 인증서가 없습니다. 운영체제가 신뢰하는 인증서는 고정하지 않습니다.</p>
+        <p className="muted">{m.knownHosts.noPins}</p>
       ) : (
         <table className="table">
           <thead>
             <tr>
-              <th>호스트</th>
+              <th>{m.common.host}</th>
               <th>SHA-256</th>
-              <th>저장일</th>
+              <th>{m.knownHosts.added}</th>
               <th />
             </tr>
           </thead>
@@ -154,14 +155,14 @@ export function KnownHostsDialog({ highlight, onClose }: KnownHostsDialogProps) 
                   {p.host}:{p.port}
                 </td>
                 <td className="mono fingerprint muted">{p.fingerprint}</td>
-                <td>{new Date(p.addedAt * 1000).toLocaleDateString()}</td>
+                <td>{new Date(p.addedAt * 1000).toLocaleDateString(locale)}</td>
                 <td>
                   <button
                     type="button"
                     className="button button-small button-danger-outline"
                     onClick={() => setPending({ kind: "pin", host: p.host, port: p.port })}
                   >
-                    삭제
+                    {m.common.delete}
                   </button>
                 </td>
               </tr>

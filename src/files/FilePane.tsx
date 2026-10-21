@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerE
 import type { FsEntry, Listing } from "../lib/api.ts";
 import { ArrowUpIcon, FileIcon, FolderIcon, LinkIcon, RefreshIcon } from "../components/Icons.tsx";
 import { formatDate, formatPermissions, formatSize } from "./transfers.ts";
+import { useI18n } from "../i18n/index.ts";
 
 export type Side = "local" | "remote";
 
@@ -60,6 +61,7 @@ export function FilePane({
   onActivateFile,
   onDragStart,
 }: FilePaneProps) {
+  const { m } = useI18n();
   const { listing, loading, error, selected } = pane;
   const body = useRef<HTMLDivElement>(null);
   const entries = useMemo(() => sortEntries(listing?.entries ?? []), [listing]);
@@ -135,8 +137,8 @@ export function FilePane({
   const totalSize = entries.reduce((sum, x) => sum + x.size, 0);
   const footer =
     selected.size > 0
-      ? `${entries.length}개 중 ${selected.size}개 선택 · ${formatSize(selectedSize)}`
-      : `${entries.length}개 항목 · ${formatSize(totalSize)}`;
+      ? m.files.selectedSummary(entries.length, selected.size, formatSize(selectedSize))
+      : m.files.summary(entries.length, formatSize(totalSize));
 
   return (
     <section aria-label={label} className={`pane ${dropActive ? "is-drop" : ""}`} data-pane={side}>
@@ -152,7 +154,7 @@ export function FilePane({
           {pathPrefix && <span className="pane-prefix mono">{pathPrefix}</span>}
           <input
             className="mono"
-            aria-label={`${title} 경로`}
+            aria-label={m.files.path(title)}
             value={pathText}
             spellCheck={false}
             onChange={(e) => setPathText(e.target.value)}
@@ -162,8 +164,8 @@ export function FilePane({
         <button
           type="button"
           className="icon-button icon-button-boxed icon-button-sm"
-          aria-label="새로 고침"
-          title="새로 고침"
+          aria-label={m.files.refresh}
+          title={m.files.refresh}
           onClick={onRefresh}
         >
           <RefreshIcon />
@@ -171,8 +173,8 @@ export function FilePane({
         <button
           type="button"
           className="icon-button icon-button-boxed icon-button-sm"
-          aria-label="상위 폴더로"
-          title="상위 폴더로 (Backspace)"
+          aria-label={m.files.up}
+          title={m.files.upTitle}
           disabled={!listing?.parent}
           onClick={() => listing?.parent && onNavigate(listing.parent)}
         >
@@ -184,17 +186,17 @@ export function FilePane({
         {error ? (
           <p className="pane-message pane-error">{error}</p>
         ) : !listing ? (
-          <p className="pane-message muted">불러오는 중…</p>
+          <p className="pane-message muted">{m.common.loading}</p>
         ) : (
           <table className="file-table">
             <thead>
               <tr>
-                <th scope="col">이름</th>
+                <th scope="col">{m.common.name}</th>
                 <th scope="col" className="num">
-                  크기
+                  {m.files.size}
                 </th>
-                <th scope="col">수정한 날짜</th>
-                <th scope="col">권한</th>
+                <th scope="col">{m.files.modified}</th>
+                <th scope="col">{m.files.permissions}</th>
               </tr>
             </thead>
             <tbody>
@@ -230,12 +232,12 @@ export function FilePane({
             </tbody>
           </table>
         )}
-        {listing && entries.length === 0 && !error && <p className="pane-message muted">빈 폴더</p>}
+        {listing && entries.length === 0 && !error && <p className="pane-message muted">{m.files.emptyFolder}</p>}
       </div>
 
       <div className="pane-foot">
         {footer}
-        {listing?.truncated && <span className="pane-warn"> · 항목이 많아 일부만 표시합니다</span>}
+        {listing?.truncated && <span className="pane-warn">{m.files.truncated}</span>}
       </div>
     </section>
   );

@@ -11,6 +11,7 @@ import { SecretPrompt } from "../profiles/SecretPrompt.tsx";
 import { FileBrowser } from "../files/FileBrowser.tsx";
 import { CloseIcon, FolderIcon, SplitDownIcon, SplitRightIcon, TerminalIcon } from "../components/Icons.tsx";
 import type { SplitDirection } from "./layout.ts";
+import { messages, useI18n } from "../i18n/index.ts";
 
 export type TabState =
   | { kind: "connecting" }
@@ -84,37 +85,22 @@ function takeChunk(s: string): string {
   return s.slice(0, last >= 0xd800 && last <= 0xdbff ? WRITE_CHUNK - 1 : WRITE_CHUNK);
 }
 
-/** 연결 오류 코드별 한국어 문구. 모르는 코드는 백엔드 메시지를 그대로 씁니다. */
-const SESSION_ERROR_TEXT: Record<string, string> = {
-  connect: "서버에 연결할 수 없습니다",
-  timeout: "연결 시간이 초과되었습니다",
-  authFailed: "인증에 실패했습니다",
-  jumpAuthFailed: "점프 호스트 인증에 실패했습니다",
-  hostKeyChanged: "호스트 키가 바뀌어 연결을 차단했습니다",
-  hostKeyRejected: "호스트 키를 승인하지 않아 연결을 취소했습니다",
-  certChanged: "인증서가 바뀌어 연결을 차단했습니다",
-  certRejected: "인증서를 승인하지 않아 연결을 취소했습니다",
-  tls: "TLS 연결에 실패했습니다",
-  connectionLost: "연결이 끊어졌습니다",
-  secretStore: "키체인에 접근하지 못했습니다",
-};
-
+/** 연결 오류 코드별 문구. 모르는 코드는 백엔드 메시지를 그대로 씁니다. */
 function sessionErrorText(code: string, message: string): string {
-  const text = SESSION_ERROR_TEXT[code];
+  const text = messages().session.errors[code];
   return text ? `${text} (${message})` : message;
 }
 
 function describeExit(exitStatus: number | null): string {
-  return exitStatus === null ? "세션이 종료되었습니다." : `세션이 종료되었습니다 (종료 코드 ${exitStatus}).`;
+  const m = messages().session;
+  return exitStatus === null ? m.exited : m.exitedWithCode(exitStatus);
 }
 
 type View = "terminal" | "files";
 
 const IS_MAC = navigator.userAgent.includes("Mac");
 /** 분할 단축키 표시 (App.tsx의 처리와 맞춤) */
-export const SPLIT_KEYS = IS_MAC
-  ? { right: "⌘D", down: "⇧⌘D", focus: "⌥⌘방향키", close: "⌘W" }
-  : { right: "Alt+Shift+=", down: "Alt+Shift+-", focus: "Alt+방향키", close: "Ctrl+Shift+W" };
+export const SPLIT_KEYS = IS_MAC ? { right: "⌘D", down: "⇧⌘D" } : { right: "Alt+Shift+=", down: "Alt+Shift+-" };
 
 /**
  * SSH 연결 하나를 맡는 탭. 셸은 xterm.js에, 파일 화면은 같은 연결의 SFTP에 붙습니다.
@@ -131,6 +117,7 @@ export function TerminalTab({
   onReviewKnownHosts,
   onNotice,
 }: TerminalTabProps) {
+  const { m } = useI18n();
   const container = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -201,7 +188,10 @@ export function TerminalTab({
           break;
         case "secretNotSaved":
           onNotice(
-            `${event.name ? `점프 호스트 ${event.name}` : profile.name}의 비밀번호를 키체인에 저장하지 못했습니다. 다음 접속 때 다시 입력해야 합니다. (${event.message})`,
+            messages().session.secretNotSaved(
+              event.name ? messages().common.jumpHost(event.name) : profile.name,
+              event.message,
+            ),
           );
           break;
         case "jumpAuthFailed":
@@ -239,14 +229,14 @@ export function TerminalTab({
               profileId: jumpFail.profileId,
               name: jumpFail.name,
               mode: "password",
-              error: "인증에 실패했습니다. 비밀번호를 확인하세요.",
+              error: messages().session.authFailedRetry,
             });
-            report({ kind: "error", message: "점프 호스트 인증 실패" });
+            report({ kind: "error", message: messages().session.jumpAuthFailed });
           } else if (err?.code === "authFailed" && profile.authMethod === "password") {
             pendingTarget.current = null;
             // 저장된/입력한 비밀번호가 틀림: 다시 입력받음
-            setOverlay({ kind: "secret", mode: "password", error: "인증에 실패했습니다. 비밀번호를 확인하세요." });
-            report({ kind: "error", message: "인증 실패" });
+            setOverlay({ kind: "secret", mode: "password", error: messages().session.authFailedRetry });
+            report({ kind: "error", message: messages().session.authFailed });
           } else if (err) {
             if (err.code !== "hostKeyChanged" && err.code !== "certChanged") setOverlay({ kind: "none" });
             const text = sessionErrorText(err.code, err.message);
@@ -274,7 +264,9 @@ export function TerminalTab({
       lastError.current = null;
       connectedSeen.current = false;
       report({ kind: "connecting" });
-      t.write(`\x1b[90m${profile.username}@${profile.host}:${profile.port}에 연결하는 중…\x1b[0m\r\n`);
+      t.write(
+        `\x1b[90m${messages().session.connectingTo(`${profile.username}@${profile.host}:${profile.port}`)}\x1b[0m\r\n`,
+      );
 
       // 개발 모드 StrictMode의 재마운트 등으로 터미널이 바뀌었으면 이전 연결의 메시지는 버림
       const current = () => !disposed.current && term.current === t;
@@ -319,7 +311,7 @@ export function TerminalTab({
         } else if (isApiError(e) && e.code === "passphraseRequired") {
           setOverlay({ kind: "secret", mode: "passphrase" });
         } else if (isApiError(e) && e.code === "keyLoad" && secret !== null) {
-          setOverlay({ kind: "secret", mode: "passphrase", error: "패스프레이즈가 올바르지 않습니다." });
+          setOverlay({ kind: "secret", mode: "passphrase", error: messages().session.badPassphrase });
         } else {
           const message = isApiError(e) ? sessionErrorText(e.code, e.message) : String(e);
           t.write(`\x1b[31m${message}\x1b[0m\r\n`);
@@ -421,7 +413,7 @@ export function TerminalTab({
 
   const reconnect = (
     <button type="button" className="button button-secondary button-small" onClick={freshConnect}>
-      다시 연결
+      {m.common.reconnect}
     </button>
   );
 
@@ -429,7 +421,7 @@ export function TerminalTab({
     <div className="terminal-tab" hidden={!active} onFocusCapture={onFocus} onPointerDownCapture={onFocus}>
       {!filesOnly && (
         <div className="session-bar">
-          <div role="tablist" aria-label="화면" className="view-switch">
+          <div role="tablist" aria-label={m.session.views} className="view-switch">
             <button
               type="button"
               role="tab"
@@ -438,7 +430,7 @@ export function TerminalTab({
               onClick={() => setView("terminal")}
             >
               <TerminalIcon />
-              터미널
+              {m.session.terminal}
             </button>
             <button
               type="button"
@@ -446,11 +438,11 @@ export function TerminalTab({
               aria-selected={view === "files"}
               className={view === "files" ? "is-on" : undefined}
               disabled={!sessionId && view !== "files"}
-              title={sessionId ? "같은 연결로 파일 전송" : "연결된 뒤 사용할 수 있습니다"}
+              title={sessionId ? m.session.filesTitle : m.session.filesDisabled}
               onClick={() => setView("files")}
             >
               <FolderIcon />
-              파일
+              {m.session.files}
             </button>
           </div>
           {pane?.split && (
@@ -463,8 +455,8 @@ export function TerminalTab({
               <button
                 type="button"
                 className="icon-button"
-                aria-label="오른쪽으로 나누기"
-                title={`오른쪽으로 나누기 (${SPLIT_KEYS.right})`}
+                aria-label={m.split.right}
+                title={`${m.split.right} (${SPLIT_KEYS.right})`}
                 onClick={() => pane.onSplit("row")}
               >
                 <SplitRightIcon />
@@ -472,8 +464,8 @@ export function TerminalTab({
               <button
                 type="button"
                 className="icon-button"
-                aria-label="아래로 나누기"
-                title={`아래로 나누기 (${SPLIT_KEYS.down})`}
+                aria-label={m.split.down}
+                title={`${m.split.down} (${SPLIT_KEYS.down})`}
                 onClick={() => pane.onSplit("column")}
               >
                 <SplitDownIcon />
@@ -482,8 +474,8 @@ export function TerminalTab({
                 <button
                   type="button"
                   className="icon-button"
-                  aria-label={`${profile.name} 창 닫기`}
-                  title="창 닫기 (연결 종료)"
+                  aria-label={m.split.closePane(profile.name)}
+                  title={m.split.closePaneTitle}
                   onClick={pane.onClose}
                 >
                   <CloseIcon />
@@ -505,7 +497,7 @@ export function TerminalTab({
             <div className="session-placeholder">
               <p className={status.kind === "error" ? "status-error" : "muted"}>
                 {status.kind === "connecting"
-                  ? `${target}에 연결하는 중…`
+                  ? m.session.connectingTo(target)
                   : status.kind === "error" || status.kind === "closed"
                     ? status.message
                     : ""}
@@ -525,15 +517,15 @@ export function TerminalTab({
             pendingTarget.current = null;
             jumpSecrets.current = {};
             setOverlay({ kind: "none" });
-            report({ kind: "closed", message: "연결 취소됨" });
+            report({ kind: "closed", message: m.common.connectionCanceled });
           }}
         />
       )}
       {active && overlay.kind === "jumpSecret" && (
         <SecretPrompt
           kind={overlay.mode}
-          name={`점프 호스트 ${overlay.name}`}
-          target={`${target} 경유`}
+          name={m.common.jumpHost(overlay.name)}
+          target={m.common.via(target)}
           error={overlay.error}
           onSubmit={(secret, save) => {
             jumpSecrets.current[overlay.profileId] = secret;
@@ -544,7 +536,7 @@ export function TerminalTab({
             pendingTarget.current = null;
             jumpSecrets.current = {};
             setOverlay({ kind: "none" });
-            report({ kind: "closed", message: "연결 취소됨" });
+            report({ kind: "closed", message: m.common.connectionCanceled });
           }}
         />
       )}

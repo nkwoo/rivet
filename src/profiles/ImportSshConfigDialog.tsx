@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Dialog } from "../components/Dialog.tsx";
 import { TerminalIcon } from "../components/Icons.tsx";
 import { api, errorMessage, type Profile, type ProfileInput, type SshConfigHost } from "../lib/api.ts";
+import { useI18n } from "../i18n/index.ts";
 
 interface ImportSshConfigDialogProps {
   profiles: Profile[];
@@ -22,6 +23,7 @@ function sameTarget(p: Profile, h: SshConfigHost): boolean {
 
 /** `~/.ssh/config`의 호스트를 골라 SSH 연결로 가져옵니다. 이미 있는 연결은 기본으로 선택하지 않습니다. */
 export function ImportSshConfigDialog({ profiles, onImported, onClose }: ImportSshConfigDialogProps) {
+  const { m } = useI18n();
   const [hosts, setHosts] = useState<SshConfigHost[] | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [group, setGroup] = useState(DEFAULT_GROUP);
@@ -97,13 +99,13 @@ export function ImportSshConfigDialog({ profiles, onImported, onClose }: ImportS
       if (!h.proxyJump || !entry) continue;
       const jump = h.proxyJump.includes(",") ? undefined : findJump(h.proxyJump.trim());
       if (!jump || jump.id === entry.profile.id) {
-        failed.push(`${h.alias}: 점프 호스트 “${h.proxyJump}”를 찾지 못해 직접 연결로 만들었습니다.`);
+        failed.push(m.importConfig.jumpNotFound(h.alias, h.proxyJump));
         continue;
       }
       try {
         await api.updateProfile(entry.profile.id, { ...entry.input, jumpProfileId: jump.id });
       } catch (e) {
-        failed.push(`${h.alias}: 점프 호스트를 설정하지 못했습니다 (${errorMessage(e)}).`);
+        failed.push(m.importConfig.jumpFailed(h.alias, errorMessage(e)));
       }
     }
 
@@ -119,7 +121,7 @@ export function ImportSshConfigDialog({ profiles, onImported, onClose }: ImportS
   return (
     <Dialog
       wide
-      title="~/.ssh/config 가져오기"
+      title={m.sidebar.import}
       icon={
         <span className="dialog-icon dialog-icon-info">
           <TerminalIcon />
@@ -130,7 +132,7 @@ export function ImportSshConfigDialog({ profiles, onImported, onClose }: ImportS
         <>
           <span className="spacer" />
           <button type="button" className="button button-ghost" onClick={onClose}>
-            {failures.length > 0 ? "닫기" : "취소"}
+            {failures.length > 0 ? m.common.close : m.common.cancel}
           </button>
           <button
             type="button"
@@ -138,27 +140,26 @@ export function ImportSshConfigDialog({ profiles, onImported, onClose }: ImportS
             disabled={busy || selected.size === 0 || failures.length > 0}
             onClick={() => void importSelected()}
           >
-            {selected.size}개 가져오기
+            {m.importConfig.import(selected.size)}
           </button>
         </>
       }
     >
-      {hosts === null && !error && <p className="dialog-text muted">설정 파일을 읽는 중…</p>}
+      {hosts === null && !error && <p className="dialog-text muted">{m.importConfig.reading}</p>}
       {hosts?.length === 0 && (
         <p className="dialog-text muted">
-          가져올 호스트가 없습니다. <code className="mono">~/.ssh/config</code>에 와일드카드가 아닌{" "}
-          <code className="mono">Host</code> 항목이 있어야 합니다.
+          {m.importConfig.noneBefore}
+          <code className="mono">~/.ssh/config</code>
+          {m.importConfig.noneMiddle}
+          <code className="mono">Host</code>
+          {m.importConfig.noneAfter}
         </p>
       )}
       {hosts && hosts.length > 0 && (
         <>
-          <p className="dialog-text muted">
-            키 파일(IdentityFile)이 있으면 개인 키, 없으면 ssh-agent 인증으로 만듭니다. ProxyJump는 같은 이름의 연결을
-            점프 호스트로 설정합니다. 비밀번호와 패스프레이즈는 가져오지 않습니다. 같은 호스트·포트·사용자의 연결이 이미
-            있으면 선택하지 않습니다.
-          </p>
+          <p className="dialog-text muted">{m.importConfig.help}</p>
           <label className="field">
-            <span className="label">그룹</span>
+            <span className="label">{m.common.group}</span>
             <input maxLength={64} value={group} onChange={(e) => setGroup(e.target.value)} />
           </label>
           <div className="import-list">
@@ -168,16 +169,16 @@ export function ImportSshConfigDialog({ profiles, onImported, onClose }: ImportS
                   <th>
                     <input
                       type="checkbox"
-                      aria-label="모두 선택"
+                      aria-label={m.importConfig.selectAll}
                       checked={allSelected}
                       onChange={() =>
                         setSelected(allSelected ? new Set() : new Set(hosts.map((h) => h.alias)))
                       }
                     />
                   </th>
-                  <th>이름</th>
-                  <th>주소</th>
-                  <th>인증</th>
+                  <th>{m.common.name}</th>
+                  <th>{m.importConfig.address}</th>
+                  <th>{m.importConfig.auth}</th>
                 </tr>
               </thead>
               <tbody>
@@ -186,19 +187,19 @@ export function ImportSshConfigDialog({ profiles, onImported, onClose }: ImportS
                     <td>
                       <input
                         type="checkbox"
-                        aria-label={`${h.alias} 선택`}
+                        aria-label={m.sidebar.select(h.alias)}
                         checked={selected.has(h.alias)}
                         onChange={() => toggle(h.alias)}
                       />
                     </td>
                     <td>
                       {h.alias}
-                      {existing.has(h.alias) && <span className="tag">이미 있음</span>}
+                      {existing.has(h.alias) && <span className="tag">{m.importConfig.exists}</span>}
                     </td>
                     <td className="mono">
                       {h.user}@{h.host}
                       {h.port !== 22 ? `:${h.port}` : ""}
-                      {h.proxyJump && <div className="muted">경유 {h.proxyJump}</div>}
+                      {h.proxyJump && <div className="muted">{m.status.via(h.proxyJump)}</div>}
                     </td>
                     <td className="mono">{h.identityFile ?? "ssh-agent"}</td>
                   </tr>
@@ -210,7 +211,7 @@ export function ImportSshConfigDialog({ profiles, onImported, onClose }: ImportS
       )}
       {failures.length > 0 && (
         <div role="alert" className="form-error">
-          확인이 필요한 항목이 있습니다.
+          {m.importConfig.failures}
           <ul>
             {failures.map((f) => (
               <li key={f} className="mono">

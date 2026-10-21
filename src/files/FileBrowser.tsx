@@ -15,6 +15,7 @@ import { FilePane, emptyPane, type PaneState, type Side } from "./FilePane.tsx";
 import { TransferQueue } from "./TransferQueue.tsx";
 import { ConflictDialog, DeleteDialog, NameDialog } from "./FileDialogs.tsx";
 import { ensureTransferSubscription, fsErrorText, useTransfers } from "./transfers.ts";
+import { useI18n } from "../i18n/index.ts";
 
 interface FileBrowserProps {
   sessionId: string;
@@ -37,12 +38,7 @@ interface DragState {
   over: Side | null;
 }
 
-const POLICIES: { value: OverwritePolicy; label: string }[] = [
-  { value: "ask", label: "매번 묻기" },
-  { value: "newer", label: "더 최신이면 덮어쓰기" },
-  { value: "overwrite", label: "덮어쓰기" },
-  { value: "skip", label: "건너뛰기" },
-];
+const POLICIES: OverwritePolicy[] = ["ask", "newer", "overwrite", "skip"];
 
 function joinRemote(dir: string, name: string) {
   return dir.endsWith("/") ? dir + name : `${dir}/${name}`;
@@ -59,6 +55,7 @@ function listError(e: unknown): string {
 
 /** 로컬 ↔ 원격 2단 탐색기와 전송 큐. 원격은 탭의 SSH 연결을 공유하는 SFTP입니다. */
 export function FileBrowser({ sessionId, profile, active }: FileBrowserProps) {
+  const { m } = useI18n();
   const [local, setLocal] = useState<PaneState>(emptyPane);
   const [remote, setRemote] = useState<PaneState>(emptyPane);
   const [policy, setPolicy] = useState<OverwritePolicy>("ask");
@@ -265,13 +262,13 @@ export function FileBrowser({ sessionId, profile, active }: FileBrowserProps) {
   return (
     <div className="files" ref={root}>
       <header className="files-head">
-        <span className="files-title">전송</span>
+        <span className="files-title">{m.files.title}</span>
         <span className={`files-badge mono ${profile.protocol === "ftp" ? "is-plain" : ""}`}>
           {profile.name} · {profile.protocol === "ssh" ? "SFTP" : protocolLabel(profile.protocol)}
         </span>
         <div className="files-actions">
           <label htmlFor={`policy-${sessionId}`} className="files-policy-label">
-            같은 이름이 있으면
+            {m.files.policyLabel}
           </label>
           <select
             id={`policy-${sessionId}`}
@@ -280,8 +277,8 @@ export function FileBrowser({ sessionId, profile, active }: FileBrowserProps) {
             onChange={(e) => setPolicy(e.target.value as OverwritePolicy)}
           >
             {POLICIES.map((p) => (
-              <option key={p.value} value={p.value}>
-                {p.label}
+              <option key={p} value={p}>
+                {m.files.policy[p]}
               </option>
             ))}
           </select>
@@ -292,7 +289,7 @@ export function FileBrowser({ sessionId, profile, active }: FileBrowserProps) {
             onClick={() => transferFrom("remote", [...remote.selected])}
           >
             <DownloadIcon />
-            다운로드{remote.selected.size > 0 ? ` ${remote.selected.size}개` : ""}
+            {m.files.withCount(m.files.download, remote.selected.size)}
           </button>
           <button
             type="button"
@@ -301,7 +298,7 @@ export function FileBrowser({ sessionId, profile, active }: FileBrowserProps) {
             onClick={() => transferFrom("local", [...local.selected])}
           >
             <UploadIcon />
-            업로드{local.selected.size > 0 ? ` ${local.selected.size}개` : ""}
+            {m.files.withCount(m.files.upload, local.selected.size)}
           </button>
         </div>
       </header>
@@ -309,7 +306,7 @@ export function FileBrowser({ sessionId, profile, active }: FileBrowserProps) {
       {profile.protocol === "ftp" && (
         <div role="note" className="files-plain">
           <WarningIcon />
-          <span>평문 FTP 연결입니다. 비밀번호와 파일 내용이 암호화되지 않고 전송됩니다. 가능하면 FTPS나 SFTP를 사용하세요.</span>
+          <span>{m.files.plainFtp}</span>
         </div>
       )}
 
@@ -317,7 +314,7 @@ export function FileBrowser({ sessionId, profile, active }: FileBrowserProps) {
         <div role="alert" className="files-notice">
           <span>{notice}</span>
           <button type="button" className="link-button" onClick={() => setNotice(null)}>
-            닫기
+            {m.common.close}
           </button>
         </div>
       )}
@@ -325,8 +322,8 @@ export function FileBrowser({ sessionId, profile, active }: FileBrowserProps) {
       <div className="panes">
         <FilePane
           side="local"
-          title="로컬"
-          label="로컬 파일"
+          title={m.files.local}
+          label={m.files.localFiles}
           pane={local}
           dropActive={drag?.from === "remote" && drag.over === "local"}
           onSelect={(selected) => setLocal((p) => ({ ...p, selected }))}
@@ -337,8 +334,8 @@ export function FileBrowser({ sessionId, profile, active }: FileBrowserProps) {
         />
         <FilePane
           side="remote"
-          title="원격"
-          label={`${profile.name}의 원격 파일`}
+          title={m.files.remote}
+          label={m.files.remoteFiles(profile.name)}
           pathPrefix={`${target}:`}
           pane={remote}
           dropActive={(drag?.from === "local" && drag.over === "remote") || osDropOver}
@@ -352,8 +349,8 @@ export function FileBrowser({ sessionId, profile, active }: FileBrowserProps) {
               <button
                 type="button"
                 className="icon-button icon-button-boxed icon-button-sm"
-                aria-label="새 폴더"
-                title="새 폴더"
+                aria-label={m.files.newFolder}
+                title={m.files.newFolder}
                 disabled={!remoteDir}
                 onClick={() => setDialog({ kind: "mkdir" })}
               >
@@ -362,8 +359,8 @@ export function FileBrowser({ sessionId, profile, active }: FileBrowserProps) {
               <button
                 type="button"
                 className="icon-button icon-button-boxed icon-button-sm"
-                aria-label="이름 바꾸기"
-                title="이름 바꾸기"
+                aria-label={m.files.rename}
+                title={m.files.rename}
                 disabled={remoteSelected.length !== 1}
                 onClick={() => remoteSelected[0] && setDialog({ kind: "rename", name: remoteSelected[0].name })}
               >
@@ -372,8 +369,8 @@ export function FileBrowser({ sessionId, profile, active }: FileBrowserProps) {
               <button
                 type="button"
                 className="icon-button icon-button-boxed icon-button-sm"
-                aria-label="삭제"
-                title="삭제"
+                aria-label={m.common.delete}
+                title={m.common.delete}
                 disabled={remoteSelected.length === 0}
                 onClick={() => setDialog({ kind: "delete", entries: remoteSelected })}
               >
@@ -388,15 +385,15 @@ export function FileBrowser({ sessionId, profile, active }: FileBrowserProps) {
 
       {drag && (
         <div className="drag-ghost" style={{ left: drag.x + 14, top: drag.y + 10 }} aria-hidden="true">
-          {drag.from === "local" ? "↑ 업로드" : "↓ 다운로드"} {drag.count}개
+          {drag.from === "local" ? m.files.dragUpload(drag.count) : m.files.dragDownload(drag.count)}
         </div>
       )}
 
       {active && dialog.kind === "mkdir" && remoteDir && (
         <NameDialog
-          title="새 폴더"
+          title={m.files.newFolder}
           initial=""
-          confirm="만들기"
+          confirm={m.files.create}
           onClose={() => setDialog({ kind: "none" })}
           onSubmit={async (name) => {
             await api.sftpMkdir(sessionId, remoteDir, name).catch((e: unknown) => {
@@ -409,9 +406,9 @@ export function FileBrowser({ sessionId, profile, active }: FileBrowserProps) {
       )}
       {active && dialog.kind === "rename" && remoteDir && (
         <NameDialog
-          title="이름 바꾸기"
+          title={m.files.rename}
           initial={dialog.name}
-          confirm="바꾸기"
+          confirm={m.files.renameConfirm}
           onClose={() => setDialog({ kind: "none" })}
           onSubmit={async (name) => {
             await api.sftpRename(sessionId, remoteDir, dialog.name, name).catch((e: unknown) => {

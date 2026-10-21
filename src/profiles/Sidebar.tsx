@@ -3,6 +3,7 @@ import type { Profile } from "../lib/api.ts";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { DownloadIcon, EditIcon, SelectIcon, StarIcon } from "../components/Icons.tsx";
 import { ProtocolBadge } from "./ProtocolBadge.tsx";
+import { useI18n } from "../i18n/index.ts";
 
 interface SidebarProps {
   profiles: Profile[];
@@ -26,8 +27,9 @@ interface SidebarProps {
 /** 이만큼 움직여야 클릭이 아니라 끌기로 봄 (px) */
 const DRAG_THRESHOLD = 6;
 
-const UNGROUPED = "그룹 없음";
-const FAVORITES = "즐겨찾기";
+/** 그룹 이름과 겹치지 않는 내부 키. 화면에는 번역한 이름을 보여줌 */
+const UNGROUPED = "\u0000ungrouped";
+const FAVORITES = "\u0000favorites";
 
 /** 검색어가 이름, 호스트, 사용자, 그룹, 태그 중 하나에 포함되면 일치 */
 export function matchesQuery(p: Profile, query: string): boolean {
@@ -51,6 +53,7 @@ export function Sidebar({
   canDrag,
   onDragStart,
 }: SidebarProps) {
+  const { m } = useI18n();
   const [selecting, setSelecting] = useState(false);
   /** 끌기가 끝난 직후 같은 버튼에서 생기는 클릭을 무시 */
   const dragged = useRef(false);
@@ -102,8 +105,8 @@ export function Sidebar({
 
   if (profiles.length === 0) {
     return (
-      <nav aria-label="연결 목록" className="sidebar">
-        <p className="sidebar-empty">저장된 연결이 없습니다. 오른쪽 위의 “새 연결”로 추가하세요.</p>
+      <nav aria-label={m.sidebar.label} className="sidebar">
+        <p className="sidebar-empty">{m.sidebar.empty}</p>
         <ImportButton onImport={onImport} />
       </nav>
     );
@@ -131,7 +134,7 @@ export function Sidebar({
   };
 
   return (
-    <nav aria-label="연결 목록" className="sidebar">
+    <nav aria-label={m.sidebar.label} className="sidebar">
       {selecting && (
         <div className="sidebar-tools">
           <label className="checkbox sidebar-select-all">
@@ -140,7 +143,7 @@ export function Sidebar({
               checked={allVisibleSelected}
               onChange={() => setMany(filtered, !allVisibleSelected)}
             />
-            <span>전체 선택</span>
+            <span>{m.sidebar.selectAll}</span>
           </label>
           <button
             type="button"
@@ -148,24 +151,25 @@ export function Sidebar({
             disabled={chosen.length === 0 || busy}
             onClick={() => setConfirming(true)}
           >
-            {chosen.length}개 삭제
+            {m.sidebar.deleteSelected(chosen.length)}
           </button>
           <button type="button" className="button button-ghost button-small" onClick={stopSelecting}>
-            취소
+            {m.common.cancel}
           </button>
         </div>
       )}
-      {groups.length === 0 && <p className="sidebar-empty">“{query}”와 일치하는 연결이 없습니다.</p>}
-      {groups.map(([name, items]) => {
+      {groups.length === 0 && <p className="sidebar-empty">{m.sidebar.noMatch(query)}</p>}
+      {groups.map(([key, items]) => {
+        const name = key === UNGROUPED ? m.sidebar.ungrouped : key === FAVORITES ? m.sidebar.favorites : key;
         const groupSelected = items.every((p) => selected.has(p.id));
         return (
-          <section key={name} className="host-group">
+          <section key={key} className="host-group">
             <h3 className="host-group-title">
               {selecting ? (
                 <label className="host-group-check">
                   <input
                     type="checkbox"
-                    aria-label={`${name} 그룹 전체 선택`}
+                    aria-label={m.sidebar.selectGroup(name)}
                     checked={groupSelected}
                     onChange={() => setMany(items, !groupSelected)}
                   />
@@ -191,7 +195,7 @@ export function Sidebar({
                       className="host-open"
                       role={selecting ? "checkbox" : undefined}
                       aria-checked={selecting ? isChecked : undefined}
-                      aria-label={selecting ? `${p.name} 선택` : undefined}
+                      aria-label={selecting ? m.sidebar.select(p.name) : undefined}
                       onPointerDown={(e) => pointerDown(e, p)}
                       onClick={() => {
                         if (dragged.current) {
@@ -203,10 +207,10 @@ export function Sidebar({
                       }}
                       title={
                         selecting
-                          ? `${p.name} 선택`
+                          ? m.sidebar.select(p.name)
                           : canDrag(p)
-                            ? `${p.name}에 연결 (터미널 위로 끌어 놓으면 창을 나눠 엽니다)`
-                            : `${p.name}에 연결`
+                            ? m.sidebar.openOrDrag(p.name)
+                            : m.sidebar.open(p.name)
                       }
                     >
                       {selecting && (
@@ -224,7 +228,7 @@ export function Sidebar({
                         <span className="host-name">
                           {p.name}
                           {p.favorite && (
-                            <span className="host-star" aria-label="즐겨찾기">
+                            <span className="host-star" aria-label={m.sidebar.favorites}>
                               <StarIcon filled />
                             </span>
                           )}
@@ -237,7 +241,7 @@ export function Sidebar({
                       </span>
                       <span
                         className={`dot ${connectedIds.has(p.id) ? "dot-on" : ""}`}
-                        aria-label={connectedIds.has(p.id) ? "연결됨" : undefined}
+                        aria-label={connectedIds.has(p.id) ? m.sidebar.connected : undefined}
                       />
                     </button>
                     {!selecting && (
@@ -245,8 +249,8 @@ export function Sidebar({
                         <button
                           type="button"
                           className="icon-button host-select"
-                          aria-label={`${p.name} 선택해서 삭제`}
-                          title="선택해서 삭제"
+                          aria-label={m.sidebar.selectToDelete(p.name)}
+                          title={m.sidebar.selectToDeleteTitle}
                           onClick={() => {
                             setSelected(new Set([p.id]));
                             setSelecting(true);
@@ -257,8 +261,8 @@ export function Sidebar({
                         <button
                           type="button"
                           className="icon-button host-edit"
-                          aria-label={`${p.name} 편집`}
-                          title="편집"
+                          aria-label={m.sidebar.edit(p.name)}
+                          title={m.sidebar.editTitle}
                           onClick={() => onEdit(p)}
                         >
                           <EditIcon />
@@ -275,8 +279,8 @@ export function Sidebar({
       <ImportButton onImport={onImport} />
       {confirming && (
         <ConfirmDialog
-          title={`연결 ${chosen.length}개를 삭제할까요?`}
-          confirmLabel={`${chosen.length}개 삭제`}
+          title={m.sidebar.confirmTitle(chosen.length)}
+          confirmLabel={m.sidebar.deleteSelected(chosen.length)}
           onConfirm={() => void remove()}
           onCancel={() => setConfirming(false)}
         >
@@ -285,11 +289,11 @@ export function Sidebar({
               .slice(0, 8)
               .map((p) => p.name)
               .join(", ")}
-            {chosen.length > 8 ? ` 외 ${chosen.length - 8}개` : ""}
+            {chosen.length > 8 ? m.sidebar.more(chosen.length - 8) : ""}
           </p>
           <p className="dialog-text muted">
-            저장된 비밀번호(키체인)도 함께 지웁니다.
-            {openCount > 0 && ` 열려 있는 세션 ${openCount}개는 연결을 끊고 탭을 닫습니다.`}
+            {m.sidebar.confirmSecrets}
+            {openCount > 0 && m.sidebar.confirmOpen(openCount)}
           </p>
         </ConfirmDialog>
       )}
@@ -298,11 +302,12 @@ export function Sidebar({
 }
 
 function ImportButton({ onImport }: { onImport: () => void }) {
+  const { m } = useI18n();
   return (
     <div className="sidebar-footer">
       <button type="button" className="button button-secondary button-small sidebar-import" onClick={onImport}>
         <DownloadIcon />
-        ~/.ssh/config 가져오기
+        {m.sidebar.import}
       </button>
     </div>
   );

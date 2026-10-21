@@ -1,4 +1,5 @@
 import { useRef, type CSSProperties, type PointerEvent, type ReactNode } from "react";
+import { useI18n } from "../i18n/index.ts";
 import { computeLayout, findPane, type DropSide, type PaneNode, type Rect } from "./layout.ts";
 
 interface SplitViewProps {
@@ -37,6 +38,7 @@ function dropStyle(r: Rect, side: DropSide): CSSProperties {
  * 위치만 바꾸므로, 나누거나 닫아도 남은 창(터미널과 SSH 세션)은 다시 만들어지지 않습니다.
  */
 export function SplitView({ layout, visible, focusedId, dropTarget, renderPane, onRatio }: SplitViewProps) {
+  const { m } = useI18n();
   const root = useRef<HTMLDivElement>(null);
   const { panes, dividers } = computeLayout(layout);
   const split = panes.size > 1;
@@ -102,7 +104,7 @@ export function SplitView({ layout, visible, focusedId, dropTarget, renderPane, 
             style={style}
             onPointerDown={startResize(d.splitId, d.direction, d.rect)}
             onDoubleClick={() => onRatio(d.splitId, 0.5)}
-            title="끌어서 크기 조절, 두 번 눌러 반씩 나누기"
+            title={m.split.divider}
           />
         );
       })}

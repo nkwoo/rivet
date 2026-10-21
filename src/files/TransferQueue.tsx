@@ -1,5 +1,6 @@
 import { api, errorMessage, type JobInfo } from "../lib/api.ts";
-import { formatSize, fsErrorText, isFinished, SKIP_TEXT } from "./transfers.ts";
+import { formatSize, fsErrorText, isFinished } from "./transfers.ts";
+import { messages, useI18n } from "../i18n/index.ts";
 
 interface TransferQueueProps {
   jobs: JobInfo[];
@@ -15,29 +16,31 @@ function percent(job: JobInfo): number {
 
 function status(job: JobInfo, rate: number | undefined): { text: string; tone: string } {
   const s = job.state;
+  const m = messages();
   switch (s.kind) {
     case "queued":
-      return { text: "대기 중", tone: "muted" };
+      return { text: m.queue.queued, tone: "muted" };
     case "running": {
-      const retry = job.attempt > 1 ? ` · 재시도 ${job.attempt - 1}` : "";
+      const retry = job.attempt > 1 ? m.queue.retry(job.attempt - 1) : "";
       const speed = rate ? ` · ${formatSize(rate)}/s` : "";
       return { text: `${percent(job)}%${speed}${retry}`, tone: "" };
     }
     case "conflict":
-      return { text: "같은 이름 있음 · 확인 필요", tone: "warn" };
+      return { text: m.queue.conflict, tone: "warn" };
     case "done":
-      return { text: "완료", tone: "ok" };
+      return { text: m.queue.done, tone: "ok" };
     case "skipped":
-      return { text: SKIP_TEXT[s.reason] ?? "건너뜀", tone: "muted" };
+      return { text: m.files.skipped[s.reason] ?? m.queue.skipped, tone: "muted" };
     case "failed":
       return { text: fsErrorText(s.code, s.message), tone: "warn" };
     case "cancelled":
-      return { text: "취소됨", tone: "muted" };
+      return { text: m.queue.cancelled, tone: "muted" };
   }
 }
 
 /** 이 세션의 전송 목록 (시안: 하단 큐) */
 export function TransferQueue({ jobs, rates, onError }: TransferQueueProps) {
+  const { m } = useI18n();
   const active = jobs.filter((j) => !isFinished(j));
   const running = jobs.filter((j) => j.state.kind === "running").length;
   const totalRate = jobs.reduce((sum, j) => sum + (j.state.kind === "running" ? (rates[j.id] ?? 0) : 0), 0);
@@ -46,13 +49,13 @@ export function TransferQueue({ jobs, rates, onError }: TransferQueueProps) {
   const run = (p: Promise<unknown>) => p.catch((e: unknown) => onError(errorMessage(e)));
 
   return (
-    <section aria-label="전송 큐" className="queue">
+    <section aria-label={m.queue.label} className="queue">
       <div className="queue-head">
-        <span className="queue-title">전송</span>
+        <span className="queue-title">{m.files.title}</span>
         <span className="mono muted queue-summary">
           {jobs.length === 0
-            ? "파일을 끌어다 놓거나 업로드/다운로드 버튼을 누르세요"
-            : `${jobs.length}개 · 진행 ${running} · 남음 ${active.length}${totalRate ? ` · ${formatSize(totalRate)}/s` : ""}`}
+            ? m.queue.empty
+            : `${m.queue.summary(jobs.length, running, active.length)}${totalRate ? ` · ${formatSize(totalRate)}/s` : ""}`}
         </span>
         <button
           type="button"
@@ -60,7 +63,7 @@ export function TransferQueue({ jobs, rates, onError }: TransferQueueProps) {
           disabled={!hasFinished}
           onClick={() => run(api.transferClearFinished())}
         >
-          완료 항목 지우기
+          {m.queue.clearFinished}
         </button>
       </div>
       {jobs.length > 0 && (
@@ -76,8 +79,8 @@ export function TransferQueue({ jobs, rates, onError }: TransferQueueProps) {
               <li key={job.id} className="queue-row">
                 <span
                   className={`queue-dir mono ${upload ? "is-up" : "is-down"}`}
-                  aria-label={upload ? "업로드" : "다운로드"}
-                  title={upload ? "업로드" : "다운로드"}
+                  aria-label={upload ? m.files.upload : m.files.download}
+                  title={upload ? m.files.upload : m.files.download}
                 >
                   {upload ? "↑" : "↓"}
                 </span>
@@ -85,7 +88,7 @@ export function TransferQueue({ jobs, rates, onError }: TransferQueueProps) {
                   {job.name}
                 </span>
                 <span className="queue-target mono" title={job.target}>
-                  {blocked ? "대상 폴더 밖을 가리키거나 사용할 수 없는 이름" : `→ ${job.target}`}
+                  {blocked ? m.queue.blocked : `→ ${job.target}`}
                 </span>
                 <span className="queue-bar" aria-hidden="true">
                   <span
@@ -103,7 +106,7 @@ export function TransferQueue({ jobs, rates, onError }: TransferQueueProps) {
                       className="button button-ghost button-tiny"
                       onClick={() => run(api.transferRetry(job.id))}
                     >
-                      다시 시도
+                      {m.queue.retryButton}
                     </button>
                   )}
                   {canCancel && (
@@ -112,7 +115,7 @@ export function TransferQueue({ jobs, rates, onError }: TransferQueueProps) {
                       className="button button-ghost button-tiny"
                       onClick={() => run(api.transferCancel(job.id))}
                     >
-                      취소
+                      {m.common.cancel}
                     </button>
                   )}
                 </span>

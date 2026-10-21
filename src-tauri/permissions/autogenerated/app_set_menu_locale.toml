@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-app-set-menu-locale"
+description = "Enables the app_set_menu_locale command without any pre-configured scope."
+commands.allow = ["app_set_menu_locale"]
+
+[[permission]]
+identifier = "deny-app-set-menu-locale"
+description = "Denies the app_set_menu_locale command without any pre-configured scope."
+commands.deny = ["app_set_menu_locale"]

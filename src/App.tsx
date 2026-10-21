@@ -28,6 +28,8 @@ import {
 } from "./terminal/layout.ts";
 import { RdpTab } from "./rdp/RdpTab.tsx";
 import { StatusBar } from "./StatusBar.tsx";
+import { LanguageSelect } from "./components/LanguageSelect.tsx";
+import { messages, useI18n } from "./i18n/index.ts";
 
 export interface AppInfo {
   name: string;
@@ -70,6 +72,7 @@ function paneShortcut(
 type KnownHostsState = { highlight?: { host: string; port: number } } | null;
 
 export default function App() {
+  const { m } = useI18n();
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [query, setQuery] = useState("");
@@ -95,7 +98,7 @@ export default function App() {
     api
       .listProfiles()
       .then(setProfiles)
-      .catch((e: unknown) => showToast(`연결 목록을 불러오지 못했습니다: ${errorMessage(e)}`));
+      .catch((e: unknown) => showToast(messages().app.loadFailed(errorMessage(e))));
   }, [showToast]);
 
   useEffect(() => {
@@ -235,9 +238,9 @@ export default function App() {
     }
     closeTabsOf(removed);
     loadProfiles();
-    if (failed.length > 0) showToast(`삭제하지 못한 연결: ${failed.join(", ")}`);
-    else if (targets.length === 1 && targets[0]) showToast(`“${targets[0].name}” 연결을 삭제했습니다.`);
-    else showToast(`연결 ${removed.size}개를 삭제했습니다.`);
+    if (failed.length > 0) showToast(m.app.deleteFailed(failed.join(", ")));
+    else if (targets.length === 1 && targets[0]) showToast(m.app.deletedOne(targets[0].name));
+    else showToast(m.app.deletedMany(removed.size));
   };
 
   const deleteProfile = async (profile: Profile) => {
@@ -334,11 +337,11 @@ export default function App() {
         </div>
         <label className="search">
           <SearchIcon />
-          <span className="visually-hidden">호스트 검색</span>
+          <span className="visually-hidden">{m.app.searchLabel}</span>
           <input
             ref={searchRef}
             type="search"
-            placeholder="호스트, 그룹, 태그 검색"
+            placeholder={m.app.searchPlaceholder}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -346,17 +349,19 @@ export default function App() {
         </label>
         <div className="topbar-actions">
           <button type="button" className="button button-primary" onClick={() => setProfileDialog({ profile: null })}>
-            <PlusIcon />새 연결
+            <PlusIcon />
+            {m.common.newConnection}
           </button>
           <button
             type="button"
             className="icon-button icon-button-boxed"
-            aria-label="저장된 호스트 키와 인증서"
-            title="저장된 호스트 키와 인증서"
+            aria-label={m.app.knownHosts}
+            title={m.app.knownHosts}
             onClick={() => setKnownHosts({})}
           >
             <ShieldCheckIcon />
           </button>
+          <LanguageSelect />
         </div>
       </header>
 
@@ -391,7 +396,7 @@ export default function App() {
                   <RivetMark size={72} />
                   <span className="wordmark">Rivet</span>
                 </div>
-                <p className="muted">왼쪽 목록에서 연결을 선택하거나 새 연결을 추가하세요.</p>
+                <p className="muted">{m.app.welcome}</p>
               </div>
             )}
             {tabs.map((t) => {
@@ -464,7 +469,7 @@ export default function App() {
           profiles={profiles}
           onImported={(count) => {
             loadProfiles();
-            showToast(`~/.ssh/config에서 연결 ${count}개를 가져왔습니다.`);
+            showToast(m.app.imported(count));
           }}
           onClose={() => setImporting(false)}
         />
@@ -472,7 +477,7 @@ export default function App() {
       {knownHosts && <KnownHostsDialog highlight={knownHosts.highlight} onClose={() => setKnownHosts(null)} />}
       {profileDrag && (
         <div className="drag-ghost" style={{ left: profileDrag.x + 14, top: profileDrag.y + 10 }} aria-hidden="true">
-          {profileDrag.target ? `${profileDrag.profile.name} 나눠서 열기` : profileDrag.profile.name}
+          {profileDrag.target ? m.app.dropToSplit(profileDrag.profile.name) : profileDrag.profile.name}
         </div>
       )}
       {toast && (

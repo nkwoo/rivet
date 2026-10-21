@@ -3,13 +3,15 @@ import { Dialog } from "../components/Dialog.tsx";
 import { FolderPlusIcon, TrashIcon, WarningIcon } from "../components/Icons.tsx";
 import { errorMessage, type JobInfo } from "../lib/api.ts";
 import { formatDate, formatSize } from "./transfers.ts";
+import { messages, useI18n } from "../i18n/index.ts";
 
 /** 원격 이름 한 개로 쓸 수 있는지 (백엔드도 같은 규칙으로 다시 검사) */
 function nameProblem(name: string): string | null {
-  if (name === "" || name === "." || name === "..") return "이름을 입력하세요.";
-  if (/[/\\]/.test(name)) return "이름에 / 또는 \\를 넣을 수 없습니다.";
+  const m = messages().files;
+  if (name === "" || name === "." || name === "..") return m.nameEmpty;
+  if (/[/\\]/.test(name)) return m.nameSlash;
   // eslint-disable-next-line no-control-regex
-  if (/[\u0000-\u001f\u007f]/.test(name)) return "이름에 제어 문자를 넣을 수 없습니다.";
+  if (/[\u0000-\u001f\u007f]/.test(name)) return m.nameControl;
   return null;
 }
 
@@ -22,6 +24,7 @@ interface NameDialogProps {
 }
 
 export function NameDialog({ title, initial, confirm, onSubmit, onClose }: NameDialogProps) {
+  const { m } = useI18n();
   const [name, setName] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -55,7 +58,7 @@ export function NameDialog({ title, initial, confirm, onSubmit, onClose }: NameD
       footer={
         <>
           <button type="button" className="button button-ghost" onClick={onClose}>
-            취소
+            {m.common.cancel}
           </button>
           <button type="submit" form="name-form" className="button button-primary" disabled={busy}>
             {confirm}
@@ -65,7 +68,7 @@ export function NameDialog({ title, initial, confirm, onSubmit, onClose }: NameD
     >
       <form id="name-form" className="form" onSubmit={submit} autoComplete="off">
         <label className="field">
-          <span className="label">이름</span>
+          <span className="label">{m.common.name}</span>
           <input className="mono" value={name} spellCheck={false} onChange={(e) => setName(e.target.value)} />
         </label>
         {error && <p className="form-error">{error}</p>}
@@ -81,6 +84,7 @@ interface DeleteDialogProps {
 }
 
 export function DeleteDialog({ names, onConfirm, onClose }: DeleteDialogProps) {
+  const { m } = useI18n();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const confirm = async () => {
@@ -94,7 +98,7 @@ export function DeleteDialog({ names, onConfirm, onClose }: DeleteDialogProps) {
   };
   return (
     <Dialog
-      title={names.length === 1 ? `“${names[0]}” 삭제` : `${names.length}개 항목 삭제`}
+      title={names.length === 1 ? m.files.deleteOne(names[0] ?? "") : m.files.deleteMany(names.length)}
       tone="danger"
       icon={
         <span className="dialog-icon dialog-icon-danger">
@@ -105,15 +109,15 @@ export function DeleteDialog({ names, onConfirm, onClose }: DeleteDialogProps) {
       footer={
         <>
           <button type="button" className="button button-ghost" onClick={onClose} data-autofocus>
-            취소
+            {m.common.cancel}
           </button>
           <button type="button" className="button button-danger" onClick={confirm} disabled={busy}>
-            삭제
+            {m.common.delete}
           </button>
         </>
       }
     >
-      <p className="dialog-text">원격 서버에서 삭제하며 되돌릴 수 없습니다. 폴더는 비어 있을 때만 삭제됩니다.</p>
+      <p className="dialog-text">{m.files.deleteBody}</p>
       {error && <p className="form-error">{error}</p>}
     </Dialog>
   );
@@ -127,12 +131,12 @@ interface ConflictDialogProps {
 
 /** 같은 이름이 있을 때 (정책이 "매번 묻기"인 경우) */
 export function ConflictDialog({ job, remaining, onAnswer }: ConflictDialogProps) {
+  const { m } = useI18n();
   const [all, setAll] = useState(false);
   if (job.state.kind !== "conflict") return null;
-  const where = job.direction === "upload" ? "원격" : "로컬";
   return (
     <Dialog
-      title="같은 이름의 파일이 있습니다"
+      title={m.files.conflictTitle}
       icon={
         <span className="dialog-icon dialog-icon-danger">
           <WarningIcon />
@@ -141,10 +145,10 @@ export function ConflictDialog({ job, remaining, onAnswer }: ConflictDialogProps
       footer={
         <>
           <button type="button" className="button button-ghost" onClick={() => onAnswer(false, all)} data-autofocus>
-            건너뛰기
+            {m.files.skip}
           </button>
           <button type="button" className="button button-primary" onClick={() => onAnswer(true, all)}>
-            덮어쓰기
+            {m.files.overwrite}
           </button>
         </>
       }
@@ -153,19 +157,19 @@ export function ConflictDialog({ job, remaining, onAnswer }: ConflictDialogProps
         <span className="mono">{job.name}</span>
       </p>
       <dl className="facts">
-        <dt>{where}에 있는 파일</dt>
+        <dt>{job.direction === "upload" ? m.files.existingRemote : m.files.existingLocal}</dt>
         <dd className="mono">
           {formatSize(job.state.existingSize)} · {formatDate(job.state.existingModified)}
         </dd>
-        <dt>보낼 파일</dt>
+        <dt>{m.files.incoming}</dt>
         <dd className="mono">{formatSize(job.size)}</dd>
-        <dt>대상</dt>
+        <dt>{m.files.target}</dt>
         <dd className="mono">{job.target}</dd>
       </dl>
       {remaining > 1 && (
         <label className="checkbox">
           <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />
-          <span>남은 {remaining - 1}개에도 같은 선택 적용</span>
+          <span>{m.files.applyToRest(remaining - 1)}</span>
         </label>
       )}
     </Dialog>

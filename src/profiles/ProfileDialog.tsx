@@ -3,6 +3,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { Dialog } from "../components/Dialog.tsx";
 import { WarningIcon } from "../components/Icons.tsx";
 import { RivetMark } from "../RivetMark.tsx";
+import { useI18n } from "../i18n/index.ts";
 import {
   DEFAULT_PORTS,
   errorMessage,
@@ -14,11 +15,7 @@ import {
 } from "../lib/api.ts";
 
 const PROTOCOLS: Protocol[] = ["ssh", "sftp", "ftp", "ftps", "rdp"];
-const AUTH_LABELS: Record<AuthMethod, string> = {
-  key: "개인 키",
-  password: "비밀번호",
-  agent: "ssh-agent",
-};
+const AUTH_METHODS: AuthMethod[] = ["key", "password", "agent"];
 
 const RESOLUTIONS: [number, number][] = [
   [1280, 720],
@@ -87,6 +84,7 @@ export function ProfileDialog({
   onForgetSecret,
   onClose,
 }: ProfileDialogProps) {
+  const { m } = useI18n();
   const [form, setForm] = useState<ProfileInput>(() => initialInput(profile));
   const [tagText, setTagText] = useState(form.tags.join(", "));
   // 입력 중 빈 값을 허용하려고 문자열로 두고, 저장할 때 숫자로 검증
@@ -116,7 +114,7 @@ export function ProfileDialog({
     e.preventDefault();
     const port = parsePort(portText);
     if (port === null) {
-      setError("포트는 1에서 65535 사이의 숫자여야 합니다.");
+      setError(m.profile.badPort);
       return;
     }
     setBusy(true);
@@ -161,7 +159,7 @@ export function ProfileDialog({
     if (!profile) return;
     try {
       await onForgetSecret(profile);
-      setNotice("키체인에 저장된 비밀 값을 삭제했습니다.");
+      setNotice(m.profile.secretForgotten);
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -172,20 +170,20 @@ export function ProfileDialog({
   if (profile && confirmingDelete) {
     return (
       <ConfirmDialog
-        title="연결 삭제"
-        confirmLabel="삭제"
+        title={m.profile.deleteTitle}
+        confirmLabel={m.common.delete}
         onConfirm={() => void remove()}
         onCancel={() => setConfirmingDelete(false)}
       >
-        <p className="dialog-text">“{profile.name}” 연결을 삭제할까요?</p>
-        <p className="dialog-text muted">키체인에 저장된 비밀번호도 함께 삭제됩니다.</p>
+        <p className="dialog-text">{m.profile.deleteConfirm(profile.name)}</p>
+        <p className="dialog-text muted">{m.profile.deleteSecrets}</p>
       </ConfirmDialog>
     );
   }
 
   return (
     <Dialog
-      title={profile ? "연결 편집" : "새 연결"}
+      title={profile ? m.profile.editTitle : m.common.newConnection}
       icon={<RivetMark size={28} />}
       onClose={onClose}
       wide
@@ -193,25 +191,25 @@ export function ProfileDialog({
         <>
           {profile && (
             <button type="button" className="button button-ghost button-danger" onClick={() => setConfirmingDelete(true)} disabled={busy}>
-              삭제
+              {m.common.delete}
             </button>
           )}
           <span className="spacer" />
           <button type="button" className="button button-ghost" onClick={onClose}>
-            취소
+            {m.common.cancel}
           </button>
           <button type="submit" form="profile-form" className="button button-secondary" disabled={busy}>
-            저장
+            {m.common.save}
           </button>
           <button type="button" className="button button-primary" disabled={busy} onClick={(e) => submit(e, true)}>
-            저장 후 연결
+            {m.profile.saveAndConnect}
           </button>
         </>
       }
     >
       <form id="profile-form" className="form" onSubmit={(e) => submit(e, false)}>
         <fieldset className="field">
-          <legend className="label">프로토콜</legend>
+          <legend className="label">{m.profile.protocol}</legend>
           <div className="segmented" role="group">
             {PROTOCOLS.map((p) => (
               <button
@@ -227,32 +225,32 @@ export function ProfileDialog({
           </div>
           {form.protocol === "rdp" && (
             <p className="hint">
-              NLA(CredSSP)로 인증합니다. 사용자명은 <code className="mono">DOMAIN\user</code> 또는{" "}
-              <code className="mono">user@domain</code> 형식도 됩니다. 서버 인증서는 지문을 확인한 뒤 고정합니다.
+              {m.profile.rdpHintBefore}
+              <code className="mono">DOMAIN\user</code>
+              {m.profile.rdpHintOr}
+              <code className="mono">user@domain</code>
+              {m.profile.rdpHintAfter}
             </p>
           )}
           {form.protocol === "ftps" && (
-            <p className="hint">
-              포트 990은 암시적 TLS, 그 밖의 포트(보통 21)는 AUTH TLS로 접속합니다. 운영체제가 신뢰하지 않는 인증서는
-              지문을 확인한 뒤 고정합니다.
-            </p>
+            <p className="hint">{m.profile.ftpsHint}</p>
           )}
         </fieldset>
 
         {form.protocol === "ftp" && (
           <div role="alert" className="callout callout-warn">
             <WarningIcon />
-            <span>평문 FTP는 비밀번호와 파일을 암호화하지 않고 전송합니다. 서버가 지원하면 FTPS나 SFTP를 사용하세요.</span>
+            <span>{m.profile.plainFtpWarning}</span>
           </div>
         )}
 
         <div className="grid-4">
           <label className="field span-4">
-            <span className="label">이름</span>
+            <span className="label">{m.common.name}</span>
             <input required maxLength={100} value={form.name} onChange={(e) => set("name", e.target.value)} />
           </label>
           <label className="field span-3">
-            <span className="label">호스트</span>
+            <span className="label">{m.common.host}</span>
             <input
               required
               className="mono"
@@ -264,7 +262,7 @@ export function ProfileDialog({
             />
           </label>
           <label className="field">
-            <span className="label">포트</span>
+            <span className="label">{m.profile.port}</span>
             <input
               required
               className="mono"
@@ -277,11 +275,11 @@ export function ProfileDialog({
             />
           </label>
           <label className="field span-2">
-            <span className="label">사용자명</span>
+            <span className="label">{m.profile.username}</span>
             <input
               className="mono"
               required={isSsh}
-              placeholder={form.protocol === "ftp" || form.protocol === "ftps" ? "비우면 anonymous" : undefined}
+              placeholder={form.protocol === "ftp" || form.protocol === "ftps" ? m.profile.anonymous : undefined}
               maxLength={128}
               spellCheck={false}
               autoCapitalize="off"
@@ -290,7 +288,7 @@ export function ProfileDialog({
             />
           </label>
           <label className="field span-2">
-            <span className="label">그룹</span>
+            <span className="label">{m.common.group}</span>
             <input
               list="profile-groups"
               maxLength={64}
@@ -308,24 +306,24 @@ export function ProfileDialog({
         {isSsh && (
           <>
             <fieldset className="field">
-              <legend className="label">인증</legend>
+              <legend className="label">{m.profile.authLabel}</legend>
               <div className="radios">
-                {(Object.keys(AUTH_LABELS) as AuthMethod[]).map((m) => (
-                  <label key={m} className="radio">
+                {AUTH_METHODS.map((method) => (
+                  <label key={method} className="radio">
                     <input
                       type="radio"
                       name="auth"
-                      checked={form.authMethod === m}
-                      onChange={() => set("authMethod", m)}
+                      checked={form.authMethod === method}
+                      onChange={() => set("authMethod", method)}
                     />
-                    {AUTH_LABELS[m]}
+                    {m.profile.auth[method]}
                   </label>
                 ))}
               </div>
             </fieldset>
             {form.authMethod === "key" && (
               <label className="field">
-                <span className="label">키 파일</span>
+                <span className="label">{m.profile.keyFile}</span>
                 <input
                   className="mono"
                   required
@@ -341,12 +339,12 @@ export function ProfileDialog({
 
         {(isSsh || form.protocol === "rdp") && (
           <label className="field">
-            <span className="label">점프 호스트</span>
+            <span className="label">{m.profile.jumpHost}</span>
             <select
               value={form.jumpProfileId ?? ""}
               onChange={(e) => set("jumpProfileId", e.target.value || null)}
             >
-              <option value="">없음 (직접 연결)</option>
+              <option value="">{m.profile.direct}</option>
               {profiles
                 .filter((p) => (p.protocol === "ssh" || p.protocol === "sftp") && p.id !== profile?.id)
                 .map((p) => (
@@ -357,7 +355,7 @@ export function ProfileDialog({
                 ))}
             </select>
             {form.protocol === "rdp" && form.jumpProfileId && (
-              <span className="hint">점프 호스트에 SSH로 접속한 뒤, SSH 터널로 이 Windows의 RDP 포트에 연결합니다.</span>
+              <span className="hint">{m.profile.rdpJumpHint}</span>
             )}
           </label>
         )}
@@ -365,7 +363,7 @@ export function ProfileDialog({
         {form.protocol === "rdp" && (
           <div className="grid-4">
             <label className="field span-2">
-              <span className="label">해상도</span>
+              <span className="label">{m.profile.resolution}</span>
               <select
                 value={rdp.width && rdp.height ? `${rdp.width}x${rdp.height}` : "fit"}
                 onChange={(e) => {
@@ -373,7 +371,7 @@ export function ProfileDialog({
                   setRdp(w && h ? { width: w, height: h, hidpi: false } : { width: null, height: null });
                 }}
               >
-                <option value="fit">창에 맞춤 (탭 크기를 따라 바뀜)</option>
+                <option value="fit">{m.profile.fitResolution}</option>
                 {RESOLUTIONS.map(([w, h]) => (
                   <option key={`${w}x${h}`} value={`${w}x${h}`}>
                     {w} × {h}
@@ -382,12 +380,12 @@ export function ProfileDialog({
               </select>
             </label>
             <label className="field span-2">
-              <span className="label">원격 화면 배율</span>
+              <span className="label">{m.profile.scale}</span>
               <select
                 value={rdp.scale === null ? "auto" : String(rdp.scale)}
                 onChange={(e) => setRdp({ scale: e.target.value === "auto" ? null : Number(e.target.value) })}
               >
-                <option value="auto">자동</option>
+                <option value="auto">{m.profile.scaleAuto}</option>
                 {SCALES.map((v) => (
                   <option key={v} value={v}>
                     {v}%
@@ -398,64 +396,63 @@ export function ProfileDialog({
             {rdp.width === null && (
               <label className="checkbox span-4">
                 <input type="checkbox" checked={rdp.hidpi} onChange={(e) => setRdp({ hidpi: e.target.checked })} />
-                <span>고해상도(Retina) 디스플레이의 실제 픽셀로 접속 (선명하지만 전송량이 늘어납니다)</span>
+                <span>{m.profile.hidpi}</span>
               </label>
             )}
             <label className="field span-2">
-              <span className="label">키보드 입력 방식</span>
+              <span className="label">{m.profile.keyboard}</span>
               <select
                 value={rdp.keyboard}
                 onChange={(e) => setRdp({ keyboard: e.target.value === "local" ? "local" : "remote" })}
               >
-                <option value="remote">원격 입력기 (한/영은 원격에서 전환)</option>
-                <option value="local">맥 입력기 (한/영은 맥에서 전환)</option>
+                <option value="remote">{m.profile.keyboardRemote}</option>
+                <option value="local">{m.profile.keyboardLocal}</option>
               </select>
             </label>
             {rdp.keyboard === "remote" && (
               <label className="field span-2">
-                <span className="label">원격 한/영 전환 키</span>
+                <span className="label">{m.profile.hangulKey}</span>
                 <select
                   value={rdp.hangulKey}
                   onChange={(e) => setRdp({ hangulKey: e.target.value as RdpSettings["hangulKey"] })}
                 >
-                  <option value="lang1">한/영 키</option>
-                  <option value="rightAlt">오른쪽 Alt</option>
+                  <option value="lang1">{m.profile.hangulKeyLang1}</option>
+                  <option value="rightAlt">{m.profile.hangulKeyRightAlt}</option>
                   <option value="shiftSpace">Shift+Space</option>
                 </select>
               </label>
             )}
             <p className="hint span-4">
               {rdp.keyboard === "local"
-                ? "맥 입력기가 글자를 완성한 뒤 원격에 보냅니다. 조합 중인 글자는 마지막으로 클릭한 위치에 미리 보여 줍니다."
-                : "키를 그대로 보내 Windows 입력기가 조합하므로 자음·모음이 바로 보입니다. 원격 한/영 전환은 툴바의 한/영 버튼이나 오른쪽 ⌘로 합니다. Windows 입력기 설정에 맞는 전환 키를 고르세요."}
+                ? m.profile.keyboardLocalHint
+                : m.profile.keyboardRemoteHint}
             </p>
           </div>
         )}
 
         <div className="grid-4">
           <label className="field span-3">
-            <span className="label">태그 (쉼표로 구분)</span>
+            <span className="label">{m.profile.tags}</span>
             <input value={tagText} onChange={(e) => setTagText(e.target.value)} />
           </label>
           <label className="checkbox field-inline">
             <input type="checkbox" checked={form.favorite} onChange={(e) => set("favorite", e.target.checked)} />
-            즐겨찾기
+            {m.profile.favorite}
           </label>
         </div>
 
         <label className="field">
-          <span className="label">메모</span>
+          <span className="label">{m.profile.notes}</span>
           <textarea rows={2} maxLength={4096} value={form.notes} onChange={(e) => set("notes", e.target.value)} />
         </label>
 
         <p className="hint">
-          비밀번호와 키 패스프레이즈는 연결할 때 입력받으며, 저장을 선택하면 시스템 키체인(macOS 키체인 / Windows 자격 증명
-          관리자)에만 보관합니다. Rivet은 비밀 값을 자체 파일에 기록하지 않습니다.
+          {m.profile.secretsHint}
           {profile && (
             <>
               {" "}
               <button type="button" className="link-button" onClick={forget}>
-                저장된 비밀 값 삭제
+                {m.profile.forgetSecret}
               </button>
             </>
           )}
