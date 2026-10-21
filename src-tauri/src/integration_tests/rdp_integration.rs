@@ -19,9 +19,12 @@ use tokio::sync::mpsc;
 
 use crate::core::cert_pins::CertPinStore;
 use crate::core::db::Database;
+use crate::core::known_hosts::KnownHostsStore;
 use crate::core::profile::{AuthMethod, Profile, Protocol};
 use crate::core::secrets::{MemoryStore, SecretStore};
-use crate::core::session::{prepare_rdp_request, SessionEvent, SessionManager, SessionSink};
+use crate::core::session::{
+    prepare_rdp_request, JumpSecrets, SessionEvent, SessionManager, SessionSink,
+};
 use crate::protocols::rdp::clipboard::LocalClipboard;
 use crate::protocols::rdp::frame::KIND_FRAME;
 use crate::protocols::rdp::input::InputEvent;
@@ -211,6 +214,17 @@ impl TestServer {
     }
 
     async fn start_sized(security: Security, cert: &'static str, width: u16, height: u16) -> Self {
+        Self::start_on("127.0.0.1", security, cert, width, height).await
+    }
+
+    /// `bind`: 듣는 주소. Docker 컨테이너(점프 호스트)에서 접속해야 하면 "0.0.0.0"
+    async fn start_on(
+        bind: &'static str,
+        security: Security,
+        cert: &'static str,
+        width: u16,
+        height: u16,
+    ) -> Self {
         let updates = Arc::new(Mutex::new(None));
         let shared = updates.clone();
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
@@ -223,7 +237,7 @@ impl TestServer {
                 .build()
                 .unwrap();
             rt.block_on(async move {
-                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let listener = TcpListener::bind((bind, 0)).await.unwrap();
                 let _ = ready_tx.send(listener.local_addr().unwrap());
                 let mut server =
                     Self::build(security, cert, tx, DesktopSize { width, height }, shared);
@@ -307,6 +321,7 @@ fn profile(port: u16) -> Profile {
         notes: String::new(),
         favorite: false,
         rdp: None,
+        jump_profile_id: None,
         created_at: 0,
         updated_at: 0,
     }
@@ -348,6 +363,7 @@ impl LocalClipboard for MemoryClipboard {
 struct Harness {
     manager: Arc<SessionManager>,
     pins: Arc<CertPinStore>,
+    known_hosts: Arc<KnownHostsStore>,
     secrets: Arc<MemoryStore>,
 }
 
@@ -356,6 +372,9 @@ impl Harness {
         Self {
             manager: SessionManager::new(),
             pins: Arc::new(CertPinStore::new(Arc::new(
+                Database::open_in_memory().unwrap(),
+            ))),
+            known_hosts: Arc::new(KnownHostsStore::new(Arc::new(
                 Database::open_in_memory().unwrap(),
             ))),
             secrets: Arc::new(MemoryStore::default()),
@@ -374,19 +393,50 @@ impl Harness {
         width: u16,
         height: u16,
     ) -> Session {
+        self.connect_with(
+            p,
+            &[],
+            JumpSecrets::default(),
+            password,
+            save,
+            width,
+            height,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn connect_with(
+        &self,
+        p: &Profile,
+        jumps: &[Profile],
+        jump_secrets: JumpSecrets,
+        password: Option<&str>,
+        save: bool,
+        width: u16,
+        height: u16,
+    ) -> Session {
         let secrets: Arc<dyn SecretStore> = self.secrets.clone();
         let size = DisplaySize {
             width,
             height,
             scale: 100,
         };
-        let request =
-            prepare_rdp_request(p, password.map(SecretString::from), save, secrets, size).unwrap();
+        let request = prepare_rdp_request(
+            p,
+            jumps,
+            password.map(SecretString::from),
+            save,
+            jump_secrets,
+            secrets,
+            size,
+        )
+        .unwrap();
         let (events, rx) = mpsc::unbounded_channel();
         let (frames, frames_rx) = mpsc::unbounded_channel();
         let id = self.manager.spawn_rdp(
             request,
             self.pins.clone(),
+            self.known_hosts.clone(),
             Arc::new(Sink { events, frames }),
             Arc::new(MemoryClipboard::default()),
         );
@@ -862,4 +912,97 @@ async fn rdp_integration_small_update_latency() {
         samples[samples.len() / 2],
         samples[samples.len() * 9 / 10]
     );
+}
+
+/// SSH 터널을 거친 RDP: Docker OpenSSH 컨테이너를 점프 호스트로 쓰고, 컨테이너에서 호스트의
+/// 테스트 RDP 서버(host.docker.internal)로 터널을 엽니다. `run-ssh-it.sh`로 실행합니다.
+#[tokio::test]
+#[ignore = "needs Docker OpenSSH: tests/docker/run-ssh-it.sh"]
+async fn ssh_integration_rdp_over_jump_host_tunnel() {
+    let _serial = SERIAL.lock().await;
+    let ssh_port: u16 = std::env::var("RIVET_IT_SSH_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(2222);
+    let server = TestServer::start_on("0.0.0.0", Security::Nla, "rdp", 800, 600).await;
+    let h = Harness::new();
+
+    let jump = Profile {
+        id: "jump".into(),
+        name: "bastion".into(),
+        protocol: Protocol::Ssh,
+        host: "127.0.0.1".into(),
+        port: ssh_port,
+        username: "rivet".into(),
+        auth_method: AuthMethod::Password,
+        ..profile(0)
+    };
+    let mut target = profile(server.addr.port());
+    target.host = "host.docker.internal".into();
+    target.jump_profile_id = Some(jump.id.clone());
+
+    let mut provided = std::collections::HashMap::new();
+    provided.insert(jump.id.clone(), SecretString::from("rivet-it-password"));
+    let mut s = h.connect_with(
+        &target,
+        std::slice::from_ref(&jump),
+        JumpSecrets {
+            provided,
+            save: false,
+        },
+        Some(PASSWORD),
+        false,
+        800,
+        600,
+    );
+
+    // SSH 호스트 키(점프 호스트) → RDP 인증서 순서로 확인
+    let mut saw_host_key = false;
+    let connected = tokio::time::timeout(WAIT, async {
+        loop {
+            match s.next().await {
+                SessionEvent::HostKeyPrompt { port, .. } => {
+                    assert_eq!(port, ssh_port);
+                    saw_host_key = true;
+                    s.manager.respond_host_key(&s.id, true).unwrap();
+                }
+                SessionEvent::CertPrompt { host, .. } => {
+                    assert!(saw_host_key, "SSH host key must be verified first");
+                    assert_eq!(host, "host.docker.internal");
+                    s.manager.respond_host_key(&s.id, true).unwrap();
+                }
+                e @ SessionEvent::Connected { .. } => return e,
+                SessionEvent::Error { code, message } => {
+                    panic!("unexpected error {code}: {message}")
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .unwrap();
+    match connected {
+        SessionEvent::Connected { info } => {
+            assert_eq!(info.via, vec!["bastion".to_string()]);
+            assert!(info.kex.contains("NLA"), "{}", info.kex);
+        }
+        _ => unreachable!(),
+    }
+    // 터널 위에서 화면과 입력이 오감
+    assert_color(s.frame_of_size(800, 600).await);
+    let mut server = server;
+    s.send(RdpCommand::Input(vec![InputEvent::Key {
+        code: 0x1E,
+        down: true,
+    }]))
+    .await;
+    assert_eq!(
+        server.next_seen(|x| matches!(x, Seen::Key { .. })).await,
+        Seen::Key {
+            code: 0x1E,
+            extended: false,
+            pressed: true
+        }
+    );
+    h.manager.close(&s.id);
 }

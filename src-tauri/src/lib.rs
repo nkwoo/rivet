@@ -61,6 +61,7 @@ pub fn run() -> Result<(), Error> {
             commands::profiles::profile_update,
             commands::profiles::profile_delete,
             commands::profiles::profile_forget_secret,
+            commands::profiles::ssh_config_scan,
             commands::known_hosts::known_hosts_list,
             commands::known_hosts::known_hosts_remove,
             commands::known_hosts::cert_pins_list,

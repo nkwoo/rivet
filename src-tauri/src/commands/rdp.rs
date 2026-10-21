@@ -3,7 +3,9 @@ use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::State;
 
 use super::CmdResult;
-use crate::core::session::{prepare_rdp_request, SessionEvent, SessionId, SessionSink};
+use crate::core::session::{
+    prepare_rdp_request, JumpSecrets, SessionEvent, SessionId, SessionSink,
+};
 use crate::core::AppState;
 use crate::error::Error;
 use crate::protocols::rdp::clipboard::SystemClipboard;
@@ -44,12 +46,23 @@ pub async fn rdp_connect(
     scale: u32,
     secret: Option<String>,
     save_secret: bool,
+    jump_secrets: Option<std::collections::HashMap<String, String>>,
+    save_jump_secrets: Option<bool>,
     events: Channel<SessionEvent>,
     frames: Channel<InvokeResponseBody>,
 ) -> CmdResult<SessionId> {
     let profile = state.profiles.get(&profile_id)?;
+    let jumps = state.profiles.jump_chain(&profile)?;
     let secrets = state.secrets.clone();
     let secret = secret.map(SecretString::from);
+    let jump_secrets = JumpSecrets {
+        provided: jump_secrets
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(id, s)| (id, SecretString::from(s)))
+            .collect(),
+        save: save_jump_secrets.unwrap_or(false),
+    };
     let size = DisplaySize {
         width,
         height,
@@ -57,13 +70,22 @@ pub async fn rdp_connect(
     };
     // keyring 조회는 블로킹 작업입니다.
     let request = tauri::async_runtime::spawn_blocking(move || {
-        prepare_rdp_request(&profile, secret, save_secret, secrets, size)
+        prepare_rdp_request(
+            &profile,
+            &jumps,
+            secret,
+            save_secret,
+            jump_secrets,
+            secrets,
+            size,
+        )
     })
     .await
     .map_err(|e| Error::Invalid(e.to_string()))??;
     Ok(state.sessions.spawn_rdp(
         request,
         state.cert_pins.clone(),
+        state.known_hosts.clone(),
         std::sync::Arc::new(ChannelSink { events, frames }),
         std::sync::Arc::new(SystemClipboard),
     ))

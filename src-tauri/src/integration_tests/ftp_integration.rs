@@ -48,6 +48,7 @@ fn profile(protocol: Protocol) -> Profile {
         notes: String::new(),
         favorite: false,
         rdp: None,
+        jump_profile_id: None,
         created_at: 0,
         updated_at: 0,
     }

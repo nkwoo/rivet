@@ -35,6 +35,8 @@ export interface Profile {
   notes: string;
   favorite: boolean;
   rdp: RdpSettings | null;
+  /** 점프 호스트로 쓸 SSH 프로필 ID */
+  jumpProfileId: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -52,6 +54,17 @@ export interface ProfileInput {
   notes: string;
   favorite: boolean;
   rdp: RdpSettings | null;
+  jumpProfileId: string | null;
+}
+
+/** `~/.ssh/config`의 가져오기 후보 */
+export interface SshConfigHost {
+  alias: string;
+  host: string;
+  port: number;
+  user: string;
+  identityFile: string | null;
+  proxyJump: string | null;
 }
 
 export interface KnownHost {
@@ -78,6 +91,8 @@ export interface ConnectionInfo {
   cipher: string;
   hostKeyAlgorithm: string;
   fingerprint: string;
+  /** 거쳐 온 점프 호스트 이름 (접속 순서) */
+  via?: string[];
 }
 
 export type SessionEvent =
@@ -94,6 +109,9 @@ export type SessionEvent =
   | { type: "certChanged"; host: string; port: number; expectedFingerprint: string; actualFingerprint: string }
   | ({ type: "connected" } & ConnectionInfo)
   | { type: "clipboard"; direction: "toRemote" | "toLocal"; chars: number }
+  | { type: "jumpAuthFailed"; profileId: string; name: string }
+  /** 인증은 됐지만 키체인 저장 실패 (`name`이 비면 이 탭의 연결) */
+  | { type: "secretNotSaved"; name: string; message: string }
   | { type: "closed"; exitStatus: number | null }
   | { type: "error"; code: string; message: string };
 
@@ -161,6 +179,8 @@ export type TransferEvent =
 export interface ApiError {
   code: string;
   message: string;
+  /** 에러가 가리키는 다른 프로필 (점프 호스트 비밀번호 요청 등) */
+  profileId?: string;
 }
 
 export function isApiError(e: unknown): e is ApiError {
@@ -188,6 +208,7 @@ export const api = {
     invoke<Profile>("profile_update", { id, input }),
   deleteProfile: (id: string) => invoke<void>("profile_delete", { id }),
   forgetSecret: (id: string) => invoke<void>("profile_forget_secret", { id }),
+  sshConfigScan: () => invoke<SshConfigHost[]>("ssh_config_scan"),
 
   listKnownHosts: () => invoke<KnownHost[]>("known_hosts_list"),
   listCertPins: () => invoke<CertPin[]>("cert_pins_list"),
@@ -201,6 +222,9 @@ export const api = {
     rows: number;
     secret: string | null;
     saveSecret: boolean;
+    /** 점프 호스트 프로필 ID별로 방금 입력한 비밀 값 */
+    jumpSecrets: Record<string, string> | null;
+    saveJumpSecrets: boolean;
     events: Channel<SessionEvent>;
     output: Channel<ArrayBuffer>;
   }) => invoke<string>("ssh_connect", args),
@@ -217,6 +241,8 @@ export const api = {
     scale: number;
     secret: string | null;
     saveSecret: boolean;
+    jumpSecrets: Record<string, string> | null;
+    saveJumpSecrets: boolean;
     events: Channel<SessionEvent>;
     frames: Channel<ArrayBuffer>;
   }) => invoke<string>("rdp_connect", args),

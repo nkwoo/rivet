@@ -34,3 +34,11 @@ pub async fn profile_forget_secret(state: State<'_, AppState>, id: String) -> Cm
     state.profiles.get(&id)?;
     Ok(state.secrets.delete(&id)?)
 }
+
+/// `~/.ssh/config`의 호스트 목록 (가져오기 후보). 파일 읽기는 블로킹이라 별도 스레드에서 실행합니다.
+#[tauri::command]
+pub async fn ssh_config_scan() -> CmdResult<Vec<crate::core::ssh_config::SshConfigHost>> {
+    tauri::async_runtime::spawn_blocking(crate::core::ssh_config::load_user_config)
+        .await
+        .map_err(|e| crate::error::Error::Invalid(e.to_string()).into())
+}

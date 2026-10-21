@@ -22,21 +22,51 @@ fn account(profile_id: &str) -> String {
     format!("rivet:{profile_id}")
 }
 
+/// 실패한 키체인 작업
+#[derive(Debug, Clone, Copy)]
+enum Op {
+    Read,
+    Save,
+    Delete,
+}
+
+impl Op {
+    fn as_str(self) -> &'static str {
+        match self {
+            Op::Read => "read",
+            Op::Save => "save",
+            Op::Delete => "delete",
+        }
+    }
+}
+
 /// keyring 에러를 비밀 값 없이 설명 문자열로 변환합니다.
 /// (`BadEncoding` 등 일부 변형은 저장된 바이트를 그대로 담고 있어 `Debug`로 찍으면 안 됩니다.)
-fn store_error(e: &keyring::Error) -> Error {
-    let msg = match e {
-        keyring::Error::NoStorageAccess(_) => "keychain access denied or locked",
-        keyring::Error::PlatformFailure(_) => "keychain platform failure",
-        keyring::Error::NoDefaultStore => "no keychain available on this platform",
-        keyring::Error::BadEncoding(_) | keyring::Error::BadDataFormat(..) => {
-            "stored secret has an unexpected format"
+///
+/// OS가 돌려준 에러(macOS OSStatus, Windows 에러 코드)는 원인 파악에 필요하므로 설명과 함께 붙입니다.
+/// 이 에러들은 키체인 항목이나 OS 상태를 설명할 뿐 비밀 값을 담지 않습니다.
+fn store_error(op: Op, e: &keyring::Error) -> Error {
+    let (kind, detail) = match e {
+        keyring::Error::NoStorageAccess(inner) => {
+            ("access denied or locked", Some(inner.to_string()))
         }
-        keyring::Error::Ambiguous(_) => "multiple keychain entries match",
-        keyring::Error::TooLong(..) | keyring::Error::Invalid(..) => "invalid keychain entry",
-        _ => "keychain error",
+        keyring::Error::PlatformFailure(inner) => ("platform failure", Some(inner.to_string())),
+        keyring::Error::NoDefaultStore => ("no keychain available on this platform", None),
+        keyring::Error::BadEncoding(_) | keyring::Error::BadDataFormat(..) => {
+            ("stored secret has an unexpected format", None)
+        }
+        keyring::Error::Ambiguous(_) => ("multiple keychain entries match", None),
+        keyring::Error::TooLong(..) | keyring::Error::Invalid(..) => {
+            ("invalid keychain entry", None)
+        }
+        _ => ("keychain error", None),
     };
-    Error::SecretStore(msg.into())
+    let msg = match detail {
+        Some(d) => format!("keychain {} failed: {kind} ({d})", op.as_str()),
+        None => format!("keychain {} failed: {kind}", op.as_str()),
+    };
+    tracing::warn!(op = op.as_str(), error = %msg, "keychain operation failed");
+    Error::SecretStore(msg)
 }
 
 /// macOS 키체인 / Windows 자격 증명 관리자
@@ -44,7 +74,7 @@ pub struct KeyringStore;
 
 impl KeyringStore {
     fn entry(profile_id: &str) -> Result<keyring::Entry> {
-        keyring::Entry::new(SERVICE, &account(profile_id)).map_err(|e| store_error(&e))
+        keyring::Entry::new(SERVICE, &account(profile_id)).map_err(|e| store_error(Op::Read, &e))
     }
 }
 
@@ -52,21 +82,21 @@ impl SecretStore for KeyringStore {
     fn set(&self, profile_id: &str, secret: &SecretString) -> Result<()> {
         Self::entry(profile_id)?
             .set_password(secret.expose_secret())
-            .map_err(|e| store_error(&e))
+            .map_err(|e| store_error(Op::Save, &e))
     }
 
     fn get(&self, profile_id: &str) -> Result<Option<SecretString>> {
         match Self::entry(profile_id)?.get_password() {
             Ok(value) => Ok(Some(SecretString::from(value))),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(store_error(&e)),
+            Err(e) => Err(store_error(Op::Read, &e)),
         }
     }
 
     fn delete(&self, profile_id: &str) -> Result<()> {
         match Self::entry(profile_id)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(store_error(&e)),
+            Err(e) => Err(store_error(Op::Delete, &e)),
         }
     }
 }
@@ -125,8 +155,19 @@ mod tests {
 
     #[test]
     fn store_error_never_contains_secret_bytes() {
-        let e = store_error(&keyring::Error::BadEncoding(b"hunter2".to_vec()));
+        let e = store_error(Op::Read, &keyring::Error::BadEncoding(b"hunter2".to_vec()));
         assert!(!format!("{e} {e:?}").contains("hunter2"));
+    }
+
+    #[test]
+    fn store_error_names_operation_and_os_detail() {
+        let os =
+            std::io::Error::other("The specified item already exists in the keychain. (-25299)");
+        let e = store_error(Op::Save, &keyring::Error::PlatformFailure(Box::new(os)));
+        assert_eq!(
+            e.to_string(),
+            "secret store: keychain save failed: platform failure (The specified item already exists in the keychain. (-25299))"
+        );
     }
 
     #[test]

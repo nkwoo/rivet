@@ -41,6 +41,8 @@ interface ProfileDialogProps {
   /** 없으면 새 연결 */
   profile: Profile | null;
   groups: string[];
+  /** 점프 호스트 후보를 고르기 위한 전체 연결 목록 */
+  profiles: Profile[];
   onSave: (input: ProfileInput, connect: boolean) => Promise<void>;
   onDelete: (profile: Profile) => Promise<void>;
   onForgetSecret: (profile: Profile) => Promise<void>;
@@ -65,6 +67,7 @@ function initialInput(p: Profile | null): ProfileInput {
     notes: "",
     favorite: false,
     rdp: null,
+    jumpProfileId: null,
   };
 }
 
@@ -75,7 +78,15 @@ export function parsePort(text: string): number | null {
   return port >= 1 && port <= 65535 ? port : null;
 }
 
-export function ProfileDialog({ profile, groups, onSave, onDelete, onForgetSecret, onClose }: ProfileDialogProps) {
+export function ProfileDialog({
+  profile,
+  groups,
+  profiles,
+  onSave,
+  onDelete,
+  onForgetSecret,
+  onClose,
+}: ProfileDialogProps) {
   const [form, setForm] = useState<ProfileInput>(() => initialInput(profile));
   const [tagText, setTagText] = useState(form.tags.join(", "));
   // 입력 중 빈 값을 허용하려고 문자열로 두고, 저장할 때 숫자로 검증
@@ -121,6 +132,7 @@ export function ProfileDialog({ profile, groups, onSave, onDelete, onForgetSecre
           port,
           tags,
           keyPath: form.authMethod === "key" ? form.keyPath : null,
+          jumpProfileId: isSsh || form.protocol === "rdp" ? form.jumpProfileId : null,
           rdp: form.protocol === "rdp" ? rdp : null,
         },
         connect,
@@ -325,6 +337,29 @@ export function ProfileDialog({ profile, groups, onSave, onDelete, onForgetSecre
               </label>
             )}
           </>
+        )}
+
+        {(isSsh || form.protocol === "rdp") && (
+          <label className="field">
+            <span className="label">점프 호스트</span>
+            <select
+              value={form.jumpProfileId ?? ""}
+              onChange={(e) => set("jumpProfileId", e.target.value || null)}
+            >
+              <option value="">없음 (직접 연결)</option>
+              {profiles
+                .filter((p) => (p.protocol === "ssh" || p.protocol === "sftp") && p.id !== profile?.id)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.username}@{p.host}
+                    {p.port !== 22 ? `:${p.port}` : ""})
+                  </option>
+                ))}
+            </select>
+            {form.protocol === "rdp" && form.jumpProfileId && (
+              <span className="hint">점프 호스트에 SSH로 접속한 뒤, SSH 터널로 이 Windows의 RDP 포트에 연결합니다.</span>
+            )}
+          </label>
         )}
 
         {form.protocol === "rdp" && (

@@ -7,6 +7,7 @@ pub mod known_hosts;
 pub mod profile;
 pub mod secrets;
 pub mod session;
+pub mod ssh_config;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -89,6 +90,7 @@ mod tests {
                 notes: String::new(),
                 favorite: false,
                 rdp: None,
+                jump_profile_id: None,
             })
             .unwrap();
         secrets.set(&p.id, &SecretString::from("pw")).unwrap();

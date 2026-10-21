@@ -22,7 +22,8 @@ chmod 644 "$WORK/id_ed25519.pub"
 
 docker build -q -t "$IMAGE" "$HERE/openssh" >/dev/null
 docker rm -f "$NAME" >/dev/null 2>&1 || true
-docker run -d --name "$NAME" -p "127.0.0.1:$PORT:22" \
+# host.docker.internal: SSH 터널 경유 RDP 테스트에서 컨테이너가 호스트의 테스트 RDP 서버로 접속 (리눅스 포함)
+docker run -d --name "$NAME" -p "127.0.0.1:$PORT:22" --add-host=host.docker.internal:host-gateway \
   -v "$WORK/id_ed25519.pub:/etc/rivet/authorized_keys:ro" "$IMAGE" >/dev/null
 
 # sshd가 배너를 보낼 때까지 대기

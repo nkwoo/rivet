@@ -24,6 +24,9 @@ export function StatusBar({ app, state }: StatusBarProps) {
             <span className="dot dot-on" />
             연결됨
           </span>
+          {state.info.via && state.info.via.length > 0 && (
+            <span title="점프 호스트를 거쳐 연결됨">경유 {state.info.via.join(" → ")}</span>
+          )}
           {state.info.transport === "ssh" && (
             <>
               <span title="키 교환 · 암호화">

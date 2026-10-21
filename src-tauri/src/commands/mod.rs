@@ -21,6 +21,9 @@ use crate::error::Error;
 pub struct CommandError {
     code: &'static str,
     message: String,
+    /// 에러가 가리키는 다른 프로필 (점프 호스트 비밀번호 요청 등)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    profile_id: Option<String>,
 }
 
 impl From<Error> for CommandError {
@@ -33,9 +36,14 @@ impl From<Error> for CommandError {
             }
             _ => e.to_string(),
         };
+        let profile_id = match &e {
+            Error::JumpSecretRequired { profile_id, .. } => Some(profile_id.clone()),
+            _ => None,
+        };
         Self {
             code: e.code(),
             message,
+            profile_id,
         }
     }
 }

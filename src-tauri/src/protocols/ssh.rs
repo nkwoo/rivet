@@ -4,6 +4,8 @@
 //!   무조건 승인하는 경로가 없습니다.
 //! - 압축은 russh의 `flate2` 기능을 빼서 협상 목록에서 제외했고, 여기서도 `none`만 허용합니다.
 //! - 셸 채널은 읽기/쓰기를 분리해 큰 입력을 보내는 동안에도 출력이 계속 소비되게 합니다.
+//! - 점프 호스트: 인증을 마친 점프 연결에 `direct-tcpip` 채널을 열고 그 위에서 대상 서버와
+//!   SSH를 새로 맺습니다(OpenSSH `ProxyJump`와 같은 방식). 대상 서버의 호스트 키도 똑같이 검증합니다.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -149,6 +151,9 @@ pub struct ConnectionInfo {
     pub cipher: String,
     pub host_key_algorithm: String,
     pub fingerprint: String,
+    /// 거쳐 온 점프 호스트 이름 (접속 순서). 직접 연결이면 비어 있음
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub via: Vec<String>,
 }
 
 #[derive(Default)]
@@ -230,9 +235,12 @@ fn client_config() -> client::Config {
 pub struct SshConnection {
     handle: Handle<ClientHandler>,
     info: ConnectionInfo,
+    /// 이 연결이 지나가는 점프 호스트 연결. 대상 연결이 살아 있는 동안 유지합니다.
+    via: Option<Arc<SshConnection>>,
 }
 
 impl SshConnection {
+    /// TCP로 직접 연결합니다.
     pub async fn connect(
         target: &SshTarget,
         auth: &SshAuth,
@@ -245,7 +253,54 @@ impl SshConnection {
         .await
         .map_err(|_| SshError::Timeout)?
         .map_err(|e| SshError::Connect(e.to_string()))?;
+        Self::handshake(stream, target, auth, verifier, None).await
+    }
 
+    /// 점프 호스트 연결을 거쳐 연결합니다. 대상 주소는 점프 호스트에서 본 주소입니다.
+    pub async fn connect_via(
+        jump: Arc<SshConnection>,
+        target: &SshTarget,
+        auth: &SshAuth,
+        verifier: Arc<dyn HostKeyVerifier>,
+    ) -> Result<Self, SshError> {
+        let stream = tokio::time::timeout(
+            TCP_CONNECT_TIMEOUT,
+            jump.open_tunnel(&target.host, target.port),
+        )
+        .await
+        .map_err(|_| SshError::Timeout)??;
+        Self::handshake(stream, target, auth, verifier, Some(jump)).await
+    }
+
+    /// 이 연결을 거쳐 `host:port`로 가는 TCP 터널 (`direct-tcpip` 채널)
+    pub async fn open_tunnel(
+        &self,
+        host: &str,
+        port: u16,
+    ) -> Result<russh::ChannelStream<Msg>, SshError> {
+        let channel = self
+            .handle
+            .channel_open_direct_tcpip(host, u32::from(port), "127.0.0.1", 0)
+            .await
+            .map_err(|e| match e {
+                russh::Error::ChannelOpenFailure(reason) => SshError::Connect(format!(
+                    "jump host could not reach {host}:{port} ({reason:?})"
+                )),
+                other => SshError::Protocol(other),
+            })?;
+        Ok(channel.into_stream())
+    }
+
+    async fn handshake<S>(
+        stream: S,
+        target: &SshTarget,
+        auth: &SshAuth,
+        verifier: Arc<dyn HostKeyVerifier>,
+        via: Option<Arc<SshConnection>>,
+    ) -> Result<Self, SshError>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    {
         let state = Arc::new(Mutex::new(HandshakeState::default()));
         let handler = ClientHandler {
             host: target.host.clone(),
@@ -292,11 +347,16 @@ impl SshConnection {
             .info
             .clone();
         info.transport = "ssh".into();
-        Ok(Self { handle, info })
+        Ok(Self { handle, info, via })
     }
 
     pub fn info(&self) -> &ConnectionInfo {
         &self.info
+    }
+
+    /// 상태 표시줄에 보여줄 경유 점프 호스트 이름
+    pub fn set_via_names(&mut self, names: Vec<String>) {
+        self.info.via = names;
     }
 
     /// 서버가 연결을 끊었거나 keepalive가 실패했는지
@@ -371,11 +431,20 @@ impl SshConnection {
 
 #[async_trait]
 impl RemoteSession for SshConnection {
+    /// 연결을 끊고, 거쳐 온 점프 호스트 연결도 차례로 끊습니다.
     async fn disconnect(&self) {
         let _ = self
             .handle
             .disconnect(Disconnect::ByApplication, "", "en")
             .await;
+        let mut next = self.via.clone();
+        while let Some(jump) = next {
+            let _ = jump
+                .handle
+                .disconnect(Disconnect::ByApplication, "", "en")
+                .await;
+            next = jump.via.clone();
+        }
     }
 }
 

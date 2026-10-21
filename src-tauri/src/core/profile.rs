@@ -21,6 +21,8 @@ const MAX_NOTES: usize = 4096;
 /// RDP 해상도 범위 ([MS-RDPEDISP] 2.2.2.2.1과 같은 기준)
 const RDP_MIN_DIM: u16 = 200;
 const RDP_MAX_DIM: u16 = 8192;
+/// 점프 호스트를 거치는 단계 수 상한 (A → B → C → D → 대상)
+pub const MAX_JUMP_HOPS: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -164,6 +166,8 @@ pub struct Profile {
     pub favorite: bool,
     /// RDP 프로필의 화면 설정 (다른 프로토콜은 `None`)
     pub rdp: Option<RdpSettings>,
+    /// 점프 호스트로 쓸 SSH 프로필 ID (SSH/SFTP는 경유 접속, RDP는 SSH 터널 경유)
+    pub jump_profile_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -191,6 +195,8 @@ pub struct ProfileInput {
     pub favorite: bool,
     #[serde(default)]
     pub rdp: Option<RdpSettings>,
+    #[serde(default)]
+    pub jump_profile_id: Option<String>,
 }
 
 impl ProfileInput {
@@ -201,6 +207,7 @@ impl ProfileInput {
         self.username = self.username.trim().to_owned();
         self.key_path = non_empty(self.key_path);
         self.group = non_empty(self.group);
+        self.jump_profile_id = non_empty(self.jump_profile_id);
         self.tags = self
             .tags
             .into_iter()
@@ -237,6 +244,13 @@ impl ProfileInput {
             if self.auth_method == AuthMethod::Key && self.key_path.is_none() {
                 return Err(Error::Invalid("key file is required for key auth".into()));
             }
+        }
+        // 점프 호스트는 SSH/SFTP와 RDP(SSH 터널 경유)만 사용
+        if !matches!(
+            self.protocol,
+            Protocol::Ssh | Protocol::Sftp | Protocol::Rdp
+        ) {
+            self.jump_profile_id = None;
         }
         if self.protocol == Protocol::Rdp {
             if self.auth_method != AuthMethod::Password {
@@ -286,7 +300,8 @@ pub struct ProfileStore {
 }
 
 const COLUMNS: &str = "id, name, protocol, host, port, username, auth_method, key_path, \
-                       group_name, tags, notes, favorite, created_at, updated_at, rdp_settings";
+                       group_name, tags, notes, favorite, created_at, updated_at, rdp_settings, \
+                       jump_profile_id";
 
 impl ProfileStore {
     pub fn new(db: Arc<Database>) -> Self {
@@ -318,15 +333,63 @@ impl ProfileStore {
             .ok_or_else(|| Error::NotFound(format!("profile {id}")))
     }
 
+    /// 점프 호스트 참조를 검증합니다: 존재하는 SSH/SFTP 프로필이고, 자기 자신으로 돌아오는 순환이 없고,
+    /// 단계 수가 상한 이내여야 합니다.
+    fn check_jump(&self, self_id: Option<&str>, jump_id: Option<&str>) -> Result<()> {
+        let mut next = jump_id.map(str::to_owned);
+        let mut hops = 0;
+        while let Some(id) = next {
+            hops += 1;
+            if Some(id.as_str()) == self_id {
+                return Err(Error::Invalid(
+                    "jump host chain loops back to this profile".into(),
+                ));
+            }
+            if hops > MAX_JUMP_HOPS {
+                return Err(Error::Invalid(format!(
+                    "at most {MAX_JUMP_HOPS} jump hosts (or the chain loops)"
+                )));
+            }
+            let jump = self
+                .get(&id)
+                .map_err(|_| Error::Invalid("jump host profile does not exist".into()))?;
+            if !matches!(jump.protocol, Protocol::Ssh | Protocol::Sftp) {
+                return Err(Error::Invalid("jump host must be an SSH profile".into()));
+            }
+            next = jump.jump_profile_id;
+        }
+        Ok(())
+    }
+
+    /// 접속 순서대로 정렬한 점프 호스트 목록 (첫 번째 단계가 앞)
+    pub fn jump_chain(&self, profile: &Profile) -> Result<Vec<Profile>> {
+        let mut chain = Vec::new();
+        let mut next = profile.jump_profile_id.clone();
+        while let Some(id) = next {
+            if chain.len() >= MAX_JUMP_HOPS
+                || id == profile.id
+                || chain.iter().any(|p: &Profile| p.id == id)
+            {
+                return Err(Error::Invalid("invalid jump host chain".into()));
+            }
+            let jump = self.get(&id)?;
+            next = jump.jump_profile_id.clone();
+            chain.push(jump);
+        }
+        chain.reverse();
+        Ok(chain)
+    }
+
     pub fn create(&self, input: ProfileInput) -> Result<Profile> {
         let input = input.normalized()?;
+        self.check_jump(None, input.jump_profile_id.as_deref())?;
         let id = uuid::Uuid::new_v4().to_string();
         let ts = now();
         let tags = serde_json::to_string(&input.tags).map_err(|e| Error::Invalid(e.to_string()))?;
         let rdp = rdp_json(input.rdp)?;
         self.db.with(|c| {
             c.execute(
-                &format!("INSERT INTO profiles ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, ?14)"),
+                &format!("INSERT INTO profiles ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, ?14, ?15)"),
                 params![
                     id,
                     input.name,
@@ -342,6 +405,7 @@ impl ProfileStore {
                     input.favorite,
                     ts,
                     rdp,
+                    input.jump_profile_id,
                 ],
             )
         })?;
@@ -350,13 +414,14 @@ impl ProfileStore {
 
     pub fn update(&self, id: &str, input: ProfileInput) -> Result<Profile> {
         let input = input.normalized()?;
+        self.check_jump(Some(id), input.jump_profile_id.as_deref())?;
         let tags = serde_json::to_string(&input.tags).map_err(|e| Error::Invalid(e.to_string()))?;
         let rdp = rdp_json(input.rdp)?;
         let changed = self.db.with(|c| {
             c.execute(
                 "UPDATE profiles SET name = ?2, protocol = ?3, host = ?4, port = ?5, username = ?6, \
                  auth_method = ?7, key_path = ?8, group_name = ?9, tags = ?10, notes = ?11, \
-                 favorite = ?12, updated_at = ?13, rdp_settings = ?14 WHERE id = ?1",
+                 favorite = ?12, updated_at = ?13, rdp_settings = ?14, jump_profile_id = ?15 WHERE id = ?1",
                 params![
                     id,
                     input.name,
@@ -372,6 +437,7 @@ impl ProfileStore {
                     input.favorite,
                     now(),
                     rdp,
+                    input.jump_profile_id,
                 ],
             )
         })?;
@@ -381,10 +447,18 @@ impl ProfileStore {
         self.get(id)
     }
 
+    /// 삭제합니다. 이 프로필을 점프 호스트로 쓰던 프로필은 직접 연결로 바뀝니다.
     pub fn delete(&self, id: &str) -> Result<()> {
-        let changed = self
-            .db
-            .with(|c| c.execute("DELETE FROM profiles WHERE id = ?1", [id]))?;
+        let changed = self.db.with(|c| {
+            let tx = c.transaction()?;
+            tx.execute(
+                "UPDATE profiles SET jump_profile_id = NULL WHERE jump_profile_id = ?1",
+                [id],
+            )?;
+            let changed = tx.execute("DELETE FROM profiles WHERE id = ?1", [id])?;
+            tx.commit()?;
+            Ok(changed)
+        })?;
         if changed == 0 {
             return Err(Error::NotFound(format!("profile {id}")));
         }
@@ -425,6 +499,7 @@ fn from_row(row: &Row<'_>) -> rusqlite::Result<Profile> {
         favorite: row.get(11)?,
         created_at: row.get(12)?,
         updated_at: row.get(13)?,
+        jump_profile_id: row.get(15)?,
         rdp: row
             .get::<_, Option<String>>(14)?
             .and_then(|json| serde_json::from_str(&json).ok()),
@@ -453,7 +528,64 @@ mod tests {
             notes: String::new(),
             favorite: false,
             rdp: None,
+            jump_profile_id: None,
         }
+    }
+
+    #[test]
+    fn jump_hosts_are_validated_chained_and_cleared_on_delete() {
+        let s = store();
+        let a = s.create(input("bastion")).unwrap();
+        let mut b_in = input("inner");
+        b_in.jump_profile_id = Some(a.id.clone());
+        let b = s.create(b_in).unwrap();
+        let mut t_in = input("target");
+        t_in.jump_profile_id = Some(b.id.clone());
+        let t = s.create(t_in.clone()).unwrap();
+        let chain: Vec<_> = s
+            .jump_chain(&t)
+            .unwrap()
+            .into_iter()
+            .map(|p| p.name)
+            .collect();
+        assert_eq!(chain, ["bastion", "inner"]);
+
+        // 순환: bastion이 target을 거치게 하면 거부
+        let mut loop_in = input("bastion");
+        loop_in.jump_profile_id = Some(t.id.clone());
+        assert!(matches!(s.update(&a.id, loop_in), Err(Error::Invalid(_))));
+        // 자기 자신, 없는 프로필, SSH가 아닌 프로필은 거부
+        let mut self_in = t_in.clone();
+        self_in.jump_profile_id = Some(t.id.clone());
+        assert!(s.update(&t.id, self_in).is_err());
+        let mut missing = input("x");
+        missing.jump_profile_id = Some("nope".into());
+        assert!(s.create(missing).is_err());
+        let mut rdp_in = input("win");
+        rdp_in.protocol = Protocol::Rdp;
+        let rdp = s.create(rdp_in).unwrap();
+        let mut via_rdp = input("y");
+        via_rdp.jump_profile_id = Some(rdp.id.clone());
+        assert!(s.create(via_rdp).is_err());
+
+        // 중간 단계를 지우면 그 다음 프로필은 직접 연결이 됨
+        s.delete(&b.id).unwrap();
+        assert_eq!(s.get(&t.id).unwrap().jump_profile_id, None);
+        assert!(s.jump_chain(&s.get(&t.id).unwrap()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn jump_chain_depth_is_limited() {
+        let s = store();
+        let mut prev: Option<String> = None;
+        for i in 0..=MAX_JUMP_HOPS {
+            let mut i_in = input(&format!("hop{i}"));
+            i_in.jump_profile_id = prev.clone();
+            prev = Some(s.create(i_in).unwrap().id);
+        }
+        let mut too_deep = input("target");
+        too_deep.jump_profile_id = prev;
+        assert!(s.create(too_deep).is_err());
     }
 
     #[test]

@@ -32,6 +32,18 @@ pub enum Error {
     #[error("password required")]
     PasswordRequired,
 
+    /// 점프 호스트의 비밀번호/패스프레이즈가 저장되어 있지 않음
+    #[error("{name}")]
+    JumpSecretRequired {
+        profile_id: String,
+        name: String,
+        passphrase: bool,
+    },
+
+    /// 점프 호스트 단계에서 실패
+    #[error("jump host {name}: {source}")]
+    Jump { name: String, source: SshError },
+
     #[error(transparent)]
     Ssh(#[from] SshError),
 
@@ -54,6 +66,16 @@ impl Error {
             Error::Invalid(_) => "invalid",
             Error::NotFound(_) => "notFound",
             Error::PasswordRequired => "passwordRequired",
+            Error::JumpSecretRequired {
+                passphrase: false, ..
+            } => "jumpPasswordRequired",
+            Error::JumpSecretRequired {
+                passphrase: true, ..
+            } => "jumpPassphraseRequired",
+            Error::Jump { source, .. } => match source {
+                SshError::AuthFailed => "jumpAuthFailed",
+                other => other.code(),
+            },
             Error::Ssh(e) => e.code(),
             Error::Fs(e) => e.code(),
             Error::Ftp(e) => e.code(),
