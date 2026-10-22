@@ -3,6 +3,8 @@
 SFTP, FTP and FTPS connections open in a two-pane explorer with local files on the left and remote files on the right.
 For SSH connections, choose **Files** in the tab's **View** switch to use SFTP over the same connection.
 
+![SFTP file explorer](/screenshot2.png)
+
 ## Upload and download
 
 - Select files and click **Upload** / **Download**, or drag them to the other pane.

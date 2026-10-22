@@ -2,6 +2,8 @@
 
 RDP 연결로 Windows 10/11, Windows Server에 접속합니다.
 
+![원격 데스크톱](/screenshot3.png)
+
 ## 인증
 
 - 기본은 **NLA (CredSSP)**입니다. 사용자명은 `사용자`, `도메인\사용자`, `사용자@도메인` 형식 모두 됩니다.

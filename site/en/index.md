@@ -31,6 +31,8 @@ features:
     link: /en/guide/security
 ---
 
+![Rivet: terminal, file transfer and remote desktop](/screenshot1.png)
+
 ::: warning Pre-release (0.x)
 Settings and storage formats may change.
 :::

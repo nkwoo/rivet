@@ -21,6 +21,21 @@
 > [!NOTE]
 > 정식 릴리스 전(0.x) 단계입니다. 설정과 저장 형식이 바뀔 수 있습니다.
 
+<p align="center">
+  <img src="site/public/screenshot1.png" width="820" alt="연결 목록과 상태 표시줄의 호스트 키 검증이 보이는 Rivet SSH 터미널">
+</p>
+
+<table>
+  <tr>
+    <td><img src="site/public/screenshot2.png" alt="SFTP 2단 파일 탐색기"></td>
+    <td><img src="site/public/screenshot3.png" alt="Windows 원격 데스크톱(RDP)"></td>
+  </tr>
+  <tr>
+    <td align="center">SFTP / FTP / FTPS 파일 전송</td>
+    <td align="center">원격 데스크톱 (RDP)</td>
+  </tr>
+</table>
+
 ## 기능
 
 - **SSH 터미널** — 탭과 분할 창, 점프 호스트, `~/.ssh/config` 가져오기
