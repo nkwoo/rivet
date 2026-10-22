@@ -21,6 +21,7 @@ pub enum MenuLocale {
 }
 
 struct Labels {
+    check_update: &'static str,
     close_tab: &'static str,
     file: &'static str,
     edit: &'static str,
@@ -32,6 +33,7 @@ impl MenuLocale {
     fn labels(self) -> Labels {
         match self {
             MenuLocale::Ko => Labels {
+                check_update: "업데이트 확인…",
                 close_tab: "탭 닫기",
                 file: "파일",
                 edit: "편집",
@@ -39,6 +41,7 @@ impl MenuLocale {
                 window: "윈도우",
             },
             MenuLocale::En => Labels {
+                check_update: "Check for Updates…",
                 close_tab: "Close Tab",
                 file: "File",
                 edit: "Edit",
@@ -53,6 +56,9 @@ impl MenuLocale {
 const CLOSE_TAB_ID: &str = "close-tab";
 /// 웹뷰가 구독하는 이벤트 이름 (`src/App.tsx`)
 pub const CLOSE_TAB_EVENT: &str = "menu:close-tab";
+const CHECK_UPDATE_ID: &str = "check-update";
+/// 웹뷰가 구독하는 이벤트 이름 (`src/update/UpdateDialog.tsx`)
+pub const CHECK_UPDATE_EVENT: &str = "menu:check-update";
 
 /// macOS 기본 메뉴와 같은 구성에서 ⌘W만 "탭 닫기"로 바꾼 메뉴를 만듭니다.
 pub fn build<R: Runtime>(app: &AppHandle<R>, locale: MenuLocale) -> tauri::Result<Menu<R>> {
@@ -60,9 +66,11 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, locale: MenuLocale) -> tauri::Resul
     let close_tab = MenuItemBuilder::with_id(CLOSE_TAB_ID, labels.close_tab)
         .accelerator("CmdOrCtrl+W")
         .build(app)?;
+    let check_update = MenuItemBuilder::with_id(CHECK_UPDATE_ID, labels.check_update).build(app)?;
 
     let app_menu = SubmenuBuilder::new(app, "Rivet")
         .about(None)
+        .item(&check_update)
         .separator()
         .services()
         .separator()
@@ -97,10 +105,13 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, locale: MenuLocale) -> tauri::Resul
 
 /// 메뉴 선택을 웹뷰 이벤트로 전달합니다.
 pub fn handle_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
-    if id == CLOSE_TAB_ID {
-        if let Err(e) = app.emit_to("main", CLOSE_TAB_EVENT, ()) {
-            tracing::warn!("탭 닫기 이벤트 전달 실패: {e}");
-        }
+    let event = match id {
+        CLOSE_TAB_ID => CLOSE_TAB_EVENT,
+        CHECK_UPDATE_ID => CHECK_UPDATE_EVENT,
+        _ => return,
+    };
+    if let Err(e) = app.emit_to("main", event, ()) {
+        tracing::warn!("메뉴 이벤트 전달 실패 ({event}): {e}");
     }
 }
 
@@ -124,5 +135,7 @@ mod tests {
         for label in [l.close_tab, l.file, l.edit, l.view, l.window] {
             assert!(label.is_ascii(), "{label}");
         }
+        // 말줄임표(…)만 ASCII가 아님
+        assert!(l.check_update.trim_end_matches('…').is_ascii());
     }
 }

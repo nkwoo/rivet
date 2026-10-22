@@ -27,6 +27,25 @@ export const ko = {
     en: "English",
   },
 
+  update: {
+    title: "업데이트",
+    titleAvailable: (version: string) => `새 버전 Rivet ${version}`,
+    button: (version: string) => `${version} 업데이트`,
+    availableTitle: "새 버전을 설치할 수 있습니다",
+    check: "업데이트 확인",
+    checking: "새 버전을 확인하는 중…",
+    upToDate: "최신 버전을 사용하고 있습니다.",
+    versions: (current: string, next: string) => `현재 ${current} → 새 버전 ${next}`,
+    notes: "변경 내용",
+    sessionsWarning: (n: number) => `설치하면 앱이 다시 시작되어 열린 탭 ${n}개의 연결이 끊어집니다.`,
+    autoCheck: "시작할 때 확인",
+    later: "나중에",
+    install: "설치 후 다시 시작",
+    installing: "설치하는 중… 잠시 후 앱이 다시 시작됩니다.",
+    checkFailed: (message: string) => `업데이트를 확인하지 못했습니다: ${message}`,
+    installFailed: (message: string) => `업데이트를 설치하지 못했습니다: ${message}`,
+  },
+
   app: {
     searchLabel: "호스트 검색",
     searchPlaceholder: "호스트, 그룹, 태그 검색",

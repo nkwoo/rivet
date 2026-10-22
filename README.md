@@ -23,6 +23,10 @@ SSH, 파일 전송, 원격 데스크톱을 하나의 창에. macOS와 Windows용
 - **macOS**: "확인되지 않은 개발자" 경고가 나오면 **시스템 설정 → 개인정보 보호 및 보안**에서 **그래도 열기**를 누릅니다.
 - **Windows**: SmartScreen 경고에서 **추가 정보 → 실행**을 누릅니다.
 
+설치한 뒤에는 앱이 시작할 때 새 버전을 확인하고, 상단 막대에 알려 줍니다(업데이트 대화상자에서 끌 수 있음).
+업데이트 파일은 앱에 들어 있는 공개 키로 서명을 확인한 뒤에만 설치합니다. 직접 확인하려면 macOS 메뉴 **Rivet → 업데이트 확인…** 또는
+상태 표시줄의 버전을 누릅니다.
+
 릴리스 파일은 `SHA256SUMS.txt`와 GitHub 빌드 출처 증명(`gh attestation verify <파일> --repo nkwoo/rivet`)으로 확인할 수 있습니다.
 
 ## 개발 환경
@@ -88,7 +92,10 @@ git tag v0.2.0 && git push origin v0.2.0
 
 - 태그와 각 파일의 버전이 다르거나, 태그 커밋이 main에 없거나, `cargo deny`·`cargo audit`·`npm audit`이 실패하면 빌드하지 않습니다.
 - 버전은 `X.Y.Z`만 씁니다 (MSI가 프리릴리스 접미사를 받지 않음).
-- 초안의 설치 파일을 확인한 뒤 GitHub에서 직접 게시합니다.
+- 초안의 설치 파일을 확인한 뒤 GitHub에서 직접 게시합니다. 게시해야 `releases/latest/download/latest.json`이 바뀌어
+  설치된 앱이 업데이트를 받습니다.
+- 업데이트 서명 키(minisign)는 `release` 환경 시크릿(`TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`)에만 있고,
+  `v*` 태그 실행의 서명 작업에서만 쓰입니다. 키를 잃으면 이미 설치된 앱은 자동 업데이트를 받을 수 없으므로 따로 백업합니다.
 
 ## 보안
 

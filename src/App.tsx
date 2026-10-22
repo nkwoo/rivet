@@ -29,6 +29,7 @@ import {
 import { RdpTab } from "./rdp/RdpTab.tsx";
 import { StatusBar } from "./StatusBar.tsx";
 import { LanguageSelect } from "./components/LanguageSelect.tsx";
+import { UpdateButton, UpdateDialog, useUpdateTriggers } from "./update/UpdateDialog.tsx";
 import { messages, useI18n } from "./i18n/index.ts";
 
 export interface AppInfo {
@@ -261,6 +262,8 @@ export default function App() {
   const closeTopmostRef = useRef(closeTopmost);
   closeTopmostRef.current = closeTopmost;
 
+  useUpdateTriggers();
+
   useEffect(() => {
     const unlisten = listen("menu:close-tab", () => closeTopmostRef.current());
     return () => void unlisten.then((f) => f());
@@ -348,6 +351,7 @@ export default function App() {
           <kbd className="mono">⌘K</kbd>
         </label>
         <div className="topbar-actions">
+          <UpdateButton />
           <button type="button" className="button button-primary" onClick={() => setProfileDialog({ profile: null })}>
             <PlusIcon />
             {m.common.newConnection}
@@ -452,6 +456,7 @@ export default function App() {
       </div>
 
       <StatusBar app={info} state={activeState} />
+      <UpdateDialog openSessions={allPanes.length} />
 
       {profileDialog && (
         <ProfileDialog

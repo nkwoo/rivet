@@ -2,6 +2,7 @@ import { ShieldCheckIcon, WarningIcon } from "./components/Icons.tsx";
 import type { AppInfo } from "./App.tsx";
 import type { TabState } from "./terminal/TerminalTab.tsx";
 import { useI18n } from "./i18n/index.ts";
+import { checkNow } from "./update/updates.ts";
 
 interface StatusBarProps {
   app: AppInfo | null;
@@ -75,9 +76,14 @@ export function StatusBar({ app, state }: StatusBarProps) {
       {state?.kind === "connected" && state.detail && (
         <span className="statusbar-end mono">{state.detail}</span>
       )}
-      <span className={`muted ${state?.kind === "connected" && state.detail ? "" : "statusbar-end"}`}>
+      <button
+        type="button"
+        className={`statusbar-version ${state?.kind === "connected" && state.detail ? "" : "statusbar-end"}`}
+        title={m.update.check}
+        onClick={checkNow}
+      >
         {app ? `${app.name} ${app.version}` : "Rivet"}
-      </span>
+      </button>
     </footer>
   );
 }

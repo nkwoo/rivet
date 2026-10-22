@@ -26,6 +26,26 @@ export const en: Messages = {
     en: "English",
   },
 
+  update: {
+    title: "Updates",
+    titleAvailable: (version: string) => `Rivet ${version} is available`,
+    button: (version: string) => `Update to ${version}`,
+    availableTitle: "A new version is ready to install",
+    check: "Check for updates",
+    checking: "Checking for a new version…",
+    upToDate: "You're using the latest version.",
+    versions: (current: string, next: string) => `Current ${current} → new ${next}`,
+    notes: "What's changed",
+    sessionsWarning: (n: number) =>
+      `Installing restarts the app and disconnects ${n} open ${n === 1 ? "tab" : "tabs"}.`,
+    autoCheck: "Check at startup",
+    later: "Later",
+    install: "Install and restart",
+    installing: "Installing… The app will restart shortly.",
+    checkFailed: (message: string) => `Couldn't check for updates: ${message}`,
+    installFailed: (message: string) => `Couldn't install the update: ${message}`,
+  },
+
   app: {
     searchLabel: "Search hosts",
     searchPlaceholder: "Search hosts, groups, tags",

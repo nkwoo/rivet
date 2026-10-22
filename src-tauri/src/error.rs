@@ -55,6 +55,10 @@ pub enum Error {
 
     #[error(transparent)]
     Rdp(#[from] RdpError),
+
+    /// 업데이트 확인·내려받기·서명 확인·설치 실패
+    #[error("update: {0}")]
+    Update(String),
 }
 
 impl Error {
@@ -80,6 +84,7 @@ impl Error {
             Error::Fs(e) => e.code(),
             Error::Ftp(e) => e.code(),
             Error::Rdp(e) => e.code(),
+            Error::Update(_) => "update",
         }
     }
 }

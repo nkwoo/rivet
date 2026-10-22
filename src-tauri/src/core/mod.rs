@@ -8,6 +8,7 @@ pub mod profile;
 pub mod secrets;
 pub mod session;
 pub mod ssh_config;
+pub mod update;
 
 use std::path::Path;
 use std::sync::Arc;

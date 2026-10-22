@@ -11,6 +11,7 @@ pub mod profiles;
 pub mod rdp;
 pub mod ssh;
 pub mod transfer;
+pub mod update;
 
 use serde::Serialize;
 

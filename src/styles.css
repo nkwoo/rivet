@@ -709,6 +709,60 @@ body.is-dragging * {
   margin-left: auto;
 }
 
+.statusbar-version {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.statusbar-version:hover {
+  color: var(--text-soft);
+  text-decoration: underline;
+}
+
+/* ---------- 업데이트 ---------- */
+
+.button-update {
+  height: 32px;
+  border-color: #6b4128;
+  color: var(--signal);
+}
+
+.update-notes h3 {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.update-notes pre {
+  max-height: 220px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--field);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.update-progress {
+  display: grid;
+  gap: 6px;
+}
+
+.update-auto {
+  margin-right: auto;
+  align-self: center;
+}
+
 /* ---------- 버튼 ---------- */
 
 .button {
