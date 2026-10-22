@@ -1,0 +1,180 @@
+name: Release
+
+# v* 태그를 푸시하면 macOS(유니버설)·Windows 설치 파일을 빌드해 GitHub Releases 초안으로 올립니다.
+# 초안을 검토한 뒤 직접 게시합니다. 이 워크플로를 고치는 PR과 수동 실행은 빌드까지만 합니다.
+#
+# 쓰기 권한이 있는 워크플로이므로 액션은 커밋 SHA로 고정하고, 캐시 오염을 막기 위해 빌드 캐시를 쓰지 않습니다.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - .github/release-notes.md
+      - scripts/version.mjs
+      - src-tauri/tauri.conf.json
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  MANIFEST: src-tauri/Cargo.toml
+
+jobs:
+  verify:
+    name: Verify version and supply chain
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      # 태그와 package.json, tauri.conf.json, Cargo.toml 등의 버전이 모두 같아야 합니다.
+      - name: Check version
+        id: version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version=$(node scripts/version.mjs check "$GITHUB_REF_NAME")
+          else
+            version=$(node scripts/version.mjs check)
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # 리뷰를 거쳐 main에 들어간 커밋만 릴리스합니다.
+      - name: Check tag is on main
+        if: github.ref_type == 'tag'
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      # 병합 이후 새로 나온 권고가 있으면 릴리스를 멈춥니다.
+      - name: npm audit
+        run: npm audit --audit-level=low
+
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2.87.30
+        with:
+          tool: cargo-deny,cargo-audit
+
+      - name: cargo deny
+        run: cargo deny --manifest-path ${{ env.MANIFEST }} check
+
+      - name: cargo audit
+        run: cargo audit --file src-tauri/Cargo.lock
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: verify
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: macOS universal
+            os: macos-latest
+            target: universal-apple-darwin
+            rust-targets: aarch64-apple-darwin x86_64-apple-darwin
+            bundles: app,dmg
+            files: dmg/*.dmg
+          - name: Windows x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            rust-targets: x86_64-pc-windows-msvc
+            bundles: msi,nsis
+            files: msi/*.msi nsis/*.exe
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write # 빌드 출처 증명(attestation) 서명
+      attestations: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      # rust-toolchain.toml의 버전/컴포넌트를 사용
+      - name: Install Rust toolchain
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add ${{ matrix.rust-targets }}
+
+      - run: npm ci
+
+      # 서명 인증서가 없으므로 macOS는 ad-hoc 서명(tauri.conf.json의 signingIdentity "-")만 합니다.
+      - name: Tauri build
+        run: npm run tauri build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      - name: Collect installers
+        run: |
+          mkdir out
+          cd "src-tauri/target/${{ matrix.target }}/release/bundle"
+          cp ${{ matrix.files }} "$GITHUB_WORKSPACE/out/"
+          ls -l "$GITHUB_WORKSPACE/out"
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: github.event_name != 'pull_request'
+        with:
+          subject-path: out/*
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installers-${{ matrix.target }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    name: Draft GitHub release
+    if: github.ref_type == 'tag'
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/release-notes.md
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: installers-*
+          path: out
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: out
+        run: |
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # --notes-file 내용(설치 안내) 뒤에 이전 태그 이후 PR 목록이 붙습니다.
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" out/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --verify-tag \
+            --title "Rivet $VERSION" \
+            --notes-file .github/release-notes.md \
+            --generate-notes

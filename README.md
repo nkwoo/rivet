@@ -7,7 +7,23 @@ SSH, 파일 전송, 원격 데스크톱을 하나의 창에. macOS와 Windows용
 - **RDP** — 윈도우 서버 원격 데스크톱
 - **연결 프로필** — 비밀번호는 OS 보안 저장소(macOS 키체인, Windows 자격 증명 관리자)에만 저장
 
-> 현재 개발 초기 단계입니다. SSH 터미널, SFTP/FTP/FTPS 파일 전송, 연결 프로필이 동작하며, RDP는 실제 Windows 환경 확인 중입니다.
+> 정식 릴리스 전(0.x) 단계입니다. 설정과 저장 형식이 바뀔 수 있습니다.
+
+## 설치
+
+[Releases](https://github.com/nkwoo/rivet/releases)에서 내려받습니다.
+
+| 플랫폼 | 파일 |
+|---|---|
+| macOS (Apple Silicon, Intel) | `Rivet_<버전>_universal.dmg` |
+| Windows 10/11 x64 | `Rivet_<버전>_x64-setup.exe` 또는 `Rivet_<버전>_x64_en-US.msi` |
+
+아직 코드 서명 인증서가 없어 처음 실행할 때 OS가 경고를 표시합니다.
+
+- **macOS**: "확인되지 않은 개발자" 경고가 나오면 **시스템 설정 → 개인정보 보호 및 보안**에서 **그래도 열기**를 누릅니다.
+- **Windows**: SmartScreen 경고에서 **추가 정보 → 실행**을 누릅니다.
+
+릴리스 파일은 `SHA256SUMS.txt`와 GitHub 빌드 출처 증명(`gh attestation verify <파일> --repo nkwoo/rivet`)으로 확인할 수 있습니다.
 
 ## 개발 환경
 
@@ -58,6 +74,21 @@ docker run -d --name rivet-dev-vsftpd \
 ```
 
 로컬 키체인을 실제로 쓰는 테스트는 `cargo test --manifest-path src-tauri/Cargo.toml -- --ignored keyring`으로 따로 실행합니다.
+
+## 릴리스
+
+`v*` 태그를 푸시하면 `.github/workflows/release.yml`이 macOS(유니버설)·Windows 설치 파일을 빌드해 Releases 초안을 만듭니다.
+
+```bash
+node scripts/version.mjs set 0.2.0   # package.json, tauri.conf.json, Cargo.toml 등 버전을 한 번에 변경
+# 변경을 PR로 main에 병합한 뒤
+git checkout main && git pull
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+- 태그와 각 파일의 버전이 다르거나, 태그 커밋이 main에 없거나, `cargo deny`·`cargo audit`·`npm audit`이 실패하면 빌드하지 않습니다.
+- 버전은 `X.Y.Z`만 씁니다 (MSI가 프리릴리스 접미사를 받지 않음).
+- 초안의 설치 파일을 확인한 뒤 GitHub에서 직접 게시합니다.
 
 ## 보안
 
