@@ -1,0 +1,53 @@
+/* 앱과 같은 색: Signal(주요 동작) #F27B2B, Wire(링크) #6CA6E0, Graphite/Panel 바탕 */
+:root {
+  --vp-c-brand-1: #c4561a;
+  --vp-c-brand-2: #d8662a;
+  --vp-c-brand-3: #f27b2b;
+  --vp-c-brand-soft: rgba(242, 123, 43, 0.14);
+  --vp-home-hero-name-color: #c4561a;
+  --vp-font-family-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.dark {
+  --vp-c-bg: #0f1114;
+  --vp-c-bg-alt: #16191e;
+  --vp-c-bg-elv: #16191e;
+  --vp-c-bg-soft: #1c2026;
+  --vp-c-divider: #2a3038;
+  --vp-c-border: #3a414b;
+  --vp-c-text-1: #f4f1ea;
+  --vp-c-brand-1: #f27b2b;
+  --vp-c-brand-2: #f58f4b;
+  --vp-c-brand-3: #f27b2b;
+  --vp-home-hero-name-color: #f27b2b;
+  --vp-c-tip-1: #6ca6e0;
+  --vp-c-tip-soft: rgba(108, 166, 224, 0.14);
+}
+
+.dark .vp-doc a {
+  color: #6ca6e0;
+}
+
+.vp-doc kbd {
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.85em;
+  padding: 1px 6px;
+  border: 1px solid var(--vp-c-border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--vp-c-bg-soft);
+}
+
+/* 로고는 작은 마크라 크게 늘이지 않음 */
+.VPHero .image-src {
+  max-width: 160px;
+  max-height: 160px;
+}
+
+/* 한국어는 어절 단위로 줄바꿈 */
+html[lang="ko"] .vp-doc,
+html[lang="ko"] .VPHero,
+html[lang="ko"] .VPFeature {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}

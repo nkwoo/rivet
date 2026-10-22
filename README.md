@@ -9,6 +9,8 @@ SSH, 파일 전송, 원격 데스크톱을 하나의 창에. macOS와 Windows용
 
 > 정식 릴리스 전(0.x) 단계입니다. 설정과 저장 형식이 바뀔 수 있습니다.
 
+사용 설명서: **https://nkwoo.github.io/rivet/** (한국어 / English)
+
 ## 설치
 
 [Releases](https://github.com/nkwoo/rivet/releases)에서 내려받습니다.
@@ -81,6 +83,18 @@ docker run -d --name rivet-dev-vsftpd \
 ```
 
 로컬 키체인을 실제로 쓰는 테스트는 `cargo test --manifest-path src-tauri/Cargo.toml -- --ignored keyring`으로 따로 실행합니다.
+
+### 문서 사이트
+
+`site/`의 VitePress 사이트(한국어 `site/guide`, 영어 `site/en/guide`)는 main에 병합되면 GitHub Pages로 배포됩니다.
+앱과 의존성을 나누기 위해 `site/`에 별도 `package.json`이 있습니다.
+
+```bash
+cd site
+npm ci --ignore-scripts
+npm run dev      # http://localhost:5173/rivet/
+npm run build
+```
 
 ## 릴리스
 
