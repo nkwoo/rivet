@@ -12,3 +12,7 @@ src-tauri/gen/schemas/
 # 내부 문서 (저장소에 올리지 않음)
 docs/
 CLAUDE.md
+
+# 문서 사이트 빌드 결과
+site/.vitepress/dist/
+site/.vitepress/cache/
