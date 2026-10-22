@@ -2,6 +2,8 @@
 
 Opening an SSH connection creates a terminal tab. Full-screen programs such as vim and top work as usual, and resizing the window resizes the server's terminal.
 
+![SSH terminal](/screenshot1.png)
+
 ## Tabs
 
 Each connection opens in a new tab. <kbd>⌘W</kbd> closes the tab; if a dialog is open, it closes the dialog first.

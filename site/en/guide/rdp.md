@@ -2,6 +2,8 @@
 
 RDP connections connect to Windows 10/11 and Windows Server.
 
+![Remote desktop](/screenshot3.png)
+
 ## Authentication
 
 - **NLA (CredSSP)** is the default. User names can be `user`, `DOMAIN\user` or `user@domain`.

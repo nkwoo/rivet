@@ -38,6 +38,11 @@ export default defineConfig({
   head: [
     ["link", { rel: "icon", type: "image/svg+xml", href: "/rivet/rivet.svg" }],
     ["meta", { name: "referrer", content: "no-referrer" }],
+    // 링크 미리보기 (GitHub 저장소 소셜 미리보기와 같은 배너)
+    ["meta", { property: "og:type", content: "website" }],
+    ["meta", { property: "og:site_name", content: "Rivet" }],
+    ["meta", { property: "og:image", content: "https://nkwoo.github.io/rivet/banner.png" }],
+    ["meta", { name: "twitter:card", content: "summary_large_image" }],
   ],
   themeConfig: {
     logo: "/rivet.svg",

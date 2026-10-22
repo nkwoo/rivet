@@ -21,6 +21,21 @@
 > [!NOTE]
 > Rivet is pre-release (0.x). Settings and storage formats may change.
 
+<p align="center">
+  <img src="site/public/screenshot1.png" width="820" alt="Rivet SSH terminal with the connection list and verified host key in the status bar">
+</p>
+
+<table>
+  <tr>
+    <td><img src="site/public/screenshot2.png" alt="SFTP two-pane file explorer"></td>
+    <td><img src="site/public/screenshot3.png" alt="RDP remote desktop to Windows"></td>
+  </tr>
+  <tr>
+    <td align="center">SFTP / FTP / FTPS file transfer</td>
+    <td align="center">Remote desktop (RDP)</td>
+  </tr>
+</table>
+
 ## Features
 
 - **SSH terminal** — tabs and split panes, jump hosts, `~/.ssh/config` import

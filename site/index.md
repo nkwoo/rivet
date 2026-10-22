@@ -31,6 +31,8 @@ features:
     link: /guide/security
 ---
 
+![Rivet: 터미널, 파일 전송, 원격 데스크톱](/screenshot1.png)
+
 ::: warning 정식 릴리스 전(0.x)
 설정과 저장 형식이 바뀔 수 있습니다.
 :::
