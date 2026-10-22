@@ -343,7 +343,7 @@ export const en: Messages = {
     noHosts: "You haven't trusted any servers yet.",
     key: "Key",
     added: "Added",
-    pins: "Pinned TLS certificates (FTPS)",
+    pins: "Pinned TLS certificates (FTPS, RDP)",
     noPins: "No pinned certificates. Certificates your operating system trusts aren't pinned.",
   },
 

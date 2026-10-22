@@ -12,8 +12,8 @@ Rivet has no option to skip checking a server's identity. Instead it checks the 
 
 ## RDP and FTPS certificates
 
-- For RDP, Rivet checks the server certificate fingerprint on the first connection and pins it (TOFU).
-- For FTPS, certificates trusted by your OS connect as usual; untrusted ones (self-signed, etc.) are pinned after you check the fingerprint.
+- Certificates trusted by your OS connect as usual.
+- Untrusted certificates (self-signed, including most default Windows RDP certificates) are pinned after you check their SHA-256 fingerprint on the first connection (TOFU).
 - A certificate that differs from the pinned one blocks the connection. Review and remove pins from the shield icon (**Saved host keys and certificates**) in the top bar.
 
 ## Passwords and passphrases

@@ -10,7 +10,7 @@ RDP connections connect to Windows 10/11 and Windows Server.
 
 ## Server certificate
 
-On the first connection Rivet shows the SHA-256 fingerprint of the server certificate. After you check it with the server administrator and pin it,
+If your OS does not trust the certificate (such as Windows' default self-signed one), Rivet shows its SHA-256 fingerprint on the first connection. After you check it with the server administrator and pin it,
 Rivet connects only when the certificate is the same. A changed certificate blocks the connection. There is no option to turn certificate checks off.
 
 ## Display
