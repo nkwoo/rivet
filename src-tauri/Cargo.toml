@@ -17,6 +17,10 @@ tauri-build = { version = "2.7.3", features = [] }
 [dependencies]
 # 2.11.5 이하는 GHSA-w28w-mhc8-qvjv 등 보안 권고 대상
 tauri = { version = "2.12.4", features = [] }
+# 자동 업데이트. 내려받은 파일은 tauri.conf.json의 공개 키(minisign)로 서명을 확인한 뒤 설치합니다.
+# 보안 권고 없음 (2026-10-22 확인). 기본 기능 중 `zip`은 끕니다: 취약한 zip 4.x(RUSTSEC-2026-0369)를 끌어오고,
+# Windows는 서명된 설치 파일(nsis/msi)을 그대로 받으므로 필요 없음. macOS의 .app.tar.gz 풀기는 기능과 무관하게 포함됩니다.
+tauri-plugin-updater = { version = "2.14.0", default-features = false, features = ["rustls-tls", "system-proxy"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 thiserror = "2.0.21"

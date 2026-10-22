@@ -1,9 +1,11 @@
 name: Release
 
 # v* 태그를 푸시하면 macOS(유니버설)·Windows 설치 파일을 빌드해 GitHub Releases 초안으로 올립니다.
-# 초안을 검토한 뒤 직접 게시합니다. 이 워크플로를 고치는 PR과 수동 실행은 빌드까지만 합니다.
+# 초안을 검토한 뒤 직접 게시합니다. 게시하면 releases/latest의 latest.json으로 설치된 앱이 업데이트를 받습니다.
+# 이 워크플로를 고치는 PR과 수동 실행은 빌드까지만 합니다.
 #
 # 쓰기 권한이 있는 워크플로이므로 액션은 커밋 SHA로 고정하고, 캐시 오염을 막기 위해 빌드 캐시를 쓰지 않습니다.
+# 업데이트 서명 키는 빌드(npm 패키지가 실행되는 단계)에 넘기지 않고, 별도 sign 작업에서 Tauri CLI만 실행해 서명합니다.
 on:
   push:
     tags: ["v*"]
@@ -12,6 +14,7 @@ on:
       - .github/workflows/release.yml
       - .github/release-notes.md
       - scripts/version.mjs
+      - scripts/latest-json.mjs
       - src-tauri/tauri.conf.json
   workflow_dispatch:
 
@@ -85,13 +88,11 @@ jobs:
             target: universal-apple-darwin
             rust-targets: aarch64-apple-darwin x86_64-apple-darwin
             bundles: app,dmg
-            files: dmg/*.dmg
           - name: Windows x64
             os: windows-latest
             target: x86_64-pc-windows-msvc
             rust-targets: x86_64-pc-windows-msvc
             bundles: msi,nsis
-            files: msi/*.msi nsis/*.exe
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -121,11 +122,20 @@ jobs:
       - name: Tauri build
         run: npm run tauri build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
+      # macOS 업데이트 파일은 Rivet.app을 묶은 tar.gz (Tauri의 createUpdaterArtifacts와 같은 구조)
+      # Windows는 설치 파일(nsis, msi)을 그대로 업데이트에 씁니다.
       - name: Collect installers
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
         run: |
           mkdir out
           cd "src-tauri/target/${{ matrix.target }}/release/bundle"
-          cp ${{ matrix.files }} "$GITHUB_WORKSPACE/out/"
+          if [ "$RUNNER_OS" = macOS ]; then
+            cp dmg/*.dmg "$GITHUB_WORKSPACE/out/"
+            COPYFILE_DISABLE=1 tar -czf "$GITHUB_WORKSPACE/out/Rivet_${VERSION}_universal.app.tar.gz" -C macos Rivet.app
+          else
+            cp msi/*.msi nsis/*.exe "$GITHUB_WORKSPACE/out/"
+          fi
           ls -l "$GITHUB_WORKSPACE/out"
 
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -139,10 +149,61 @@ jobs:
           path: out/*
           if-no-files-found: error
 
+  # 업데이트 서명. 비밀 값은 v* 태그만 배포할 수 있는 release 환경에만 있습니다.
+  # 잠금 파일의 Tauri CLI만 설치 스크립트 없이 받아 실행합니다.
+  sign:
+    name: Sign updates
+    if: github.ref_type == 'tag'
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            package.json
+            package-lock.json
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - run: npm ci --ignore-scripts
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: installers-*
+          path: out
+          merge-multiple: true
+
+      # 서명에 버전을 넣어(trusted comment) 앱의 requireSignedVersion 확인을 통과하게 합니다.
+      - name: Sign
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          mkdir sigs
+          for f in out/*.app.tar.gz out/*-setup.exe out/*.msi; do
+            npx tauri signer sign --app-version "$VERSION" "$f"
+            mv "$f.sig" sigs/
+          done
+          ls -l sigs
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signatures
+          path: sigs/*
+          if-no-files-found: error
+
   release:
     name: Draft GitHub release
     if: github.ref_type == 'tag'
-    needs: [verify, build]
+    needs: [verify, build, sign]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -150,14 +211,33 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: .github/release-notes.md
+          sparse-checkout: |
+            .github/release-notes.md
+            scripts/latest-json.mjs
           sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: installers-*
           path: out
           merge-multiple: true
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signatures
+          path: out
+
+      # 앱에 보여줄 변경 내용: 이전 태그 이후 PR 제목
+      - name: Update manifest (latest.json)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" --jq .body > changes.md
+          node scripts/latest-json.mjs out "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY" changes.md
 
       - name: Checksums
         working-directory: out

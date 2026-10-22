@@ -37,6 +37,8 @@ const COMMANDS: &[&str] = &[
     "transfer_cancel",
     "transfer_retry",
     "transfer_clear_finished",
+    "update_check",
+    "update_install",
 ];
 
 fn main() {

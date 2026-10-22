@@ -44,10 +44,12 @@ pub fn run() -> Result<(), Error> {
         .init();
 
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let state = core::AppState::open(&data_dir)?;
             app.manage(state);
+            app.manage(core::update::PendingUpdate::default());
             #[cfg(target_os = "macos")]
             {
                 app.set_menu(menu::build(app.handle(), menu::MenuLocale::default())?)?;
@@ -93,6 +95,8 @@ pub fn run() -> Result<(), Error> {
             commands::transfer::transfer_cancel,
             commands::transfer::transfer_retry,
             commands::transfer::transfer_clear_finished,
+            commands::update::update_check,
+            commands::update::update_install,
         ])
         .build(tauri::generate_context!())?;
 

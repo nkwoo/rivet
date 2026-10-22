@@ -41,6 +41,8 @@
     "allow-transfer-cancel",
     "allow-transfer-retry",
     "allow-transfer-clear-finished",
+    "allow-update-check",
+    "allow-update-install",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:window:allow-close",
