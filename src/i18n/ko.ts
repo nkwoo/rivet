@@ -338,7 +338,7 @@ export const ko = {
     noHosts: "아직 신뢰한 서버가 없습니다.",
     key: "키",
     added: "저장일",
-    pins: "고정한 TLS 인증서 (FTPS)",
+    pins: "고정한 TLS 인증서 (FTPS, RDP)",
     noPins: "고정한 인증서가 없습니다. 운영체제가 신뢰하는 인증서는 고정하지 않습니다.",
   },
 
