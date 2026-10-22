@@ -38,4 +38,4 @@ Rivet은 서버 신원 확인을 건너뛰는 옵션을 두지 않습니다. 대
 ## 취약점 신고
 
 보안 취약점은 공개 이슈로 올리지 말고, GitHub 저장소의 **Security → Report a vulnerability**로 신고해 주세요.
-자세한 내용은 [SECURITY.md](https://github.com/nkwoo/rivet/blob/main/SECURITY.md)에 있습니다.
+자세한 내용은 [SECURITY.ko.md](https://github.com/nkwoo/rivet/blob/main/SECURITY.ko.md)에 있습니다.
