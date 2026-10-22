@@ -497,7 +497,12 @@ async fn ftp_integration_large_file_over_ftps_with_progress() {
             _ => None,
         })
         .collect();
-    assert!(progress.len() >= 2);
+    // 중간 진행률은 PROGRESS_INTERVAL마다만 보내므로, 전송이 그보다 넉넉히 오래 걸렸을 때만 요구.
+    // 빠른 러너에서는 끝날 때 한 번만 올 수 있음
+    if up > 4.0 * crate::transfer::PROGRESS_INTERVAL.as_secs_f64() {
+        assert!(progress.len() >= 2, "expected progress updates");
+    }
+    assert!(!progress.is_empty());
     assert!(progress.windows(2).all(|w| w[0] <= w[1]));
     assert_eq!(progress.last(), Some(&size));
 

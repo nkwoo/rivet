@@ -32,7 +32,7 @@ const RETRY_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_TREE_DEPTH: usize = 32;
 const MAX_TREE_ITEMS: usize = 10_000;
 const CHUNK: usize = 256 * 1024;
-const PROGRESS_INTERVAL: Duration = Duration::from_millis(150);
+pub(crate) const PROGRESS_INTERVAL: Duration = Duration::from_millis(150);
 /// 읽기/쓰기/완료 확인이 이 시간 동안 진행되지 않으면 시간 초과로 보고 다시 시도합니다.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
