@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { api, type JobInfo, type TransferEvent } from "../lib/api.ts";
+import { messages } from "../i18n/index.ts";
 
 /** 전송 큐 전역 상태. 백엔드 이벤트 채널은 앱에서 한 번만 등록합니다. */
 interface Snapshot {
@@ -106,26 +107,7 @@ export function formatPermissions(kind: string, mode: number | null): string {
   return out;
 }
 
-const ERROR_TEXT: Record<string, string> = {
-  pathBlocked: "경로 검사로 차단됨",
-  fsNotFound: "파일이나 폴더가 없습니다",
-  permissionDenied: "권한이 없습니다",
-  alreadyExists: "이미 있습니다",
-  notADirectory: "폴더가 아닙니다",
-  tooManyEntries: "항목이 너무 많습니다",
-  symlink: "심볼릭 링크는 따라가지 않습니다",
-  timeout: "응답 시간이 초과되었습니다",
-  connectionLost: "연결이 끊어졌습니다",
-  dataConnection: "서버의 데이터 포트에 연결할 수 없습니다 (FTP 패시브 모드). 방화벽이나 포트 포워딩을 확인하세요",
-};
-
-/** 백엔드 에러 코드를 한국어 문구로 바꿉니다. 모르는 코드는 서버 메시지를 그대로 씁니다. */
+/** 백엔드 에러 코드를 현재 언어의 문구로 바꿉니다. 모르는 코드는 서버 메시지를 그대로 씁니다. */
 export function fsErrorText(code: string, message: string): string {
-  return ERROR_TEXT[code] ?? message;
+  return messages().files.errors[code] ?? message;
 }
-
-export const SKIP_TEXT: Record<string, string> = {
-  exists: "건너뜀 · 이미 있음",
-  notNewer: "건너뜀 · 더 최신 아님",
-  symlink: "건너뜀 · 심볼릭 링크",
-};

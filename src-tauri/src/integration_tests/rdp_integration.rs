@@ -523,11 +523,12 @@ impl Session {
     }
 }
 
+/// (보안 상태, 인증 방식 코드, 인증서 지문)
 fn info(e: &SessionEvent) -> (&str, &str, &str) {
     match e {
         SessionEvent::Connected { info } => (
             info.transport.as_str(),
-            info.kex.as_str(),
+            info.cipher.as_str(),
             info.fingerprint.as_str(),
         ),
         other => panic!("not connected: {other:?}"),
@@ -554,9 +555,9 @@ async fn rdp_integration_nla_session_streams_frames_and_input() {
     };
     h.manager.respond_host_key(&s.id, true).unwrap();
     let connected = s.connected_accepting_certs().await;
-    let (transport, kex, fp) = info(&connected);
+    let (transport, auth, fp) = info(&connected);
     assert_eq!(transport, "tlsPinned");
-    assert!(kex.contains("NLA"), "{kex}");
+    assert_eq!(auth, "nla");
     assert_eq!(fp, fingerprint);
     assert_eq!(
         h.pins.pinned("127.0.0.1", p.port).unwrap().as_deref(),
@@ -740,8 +741,8 @@ async fn rdp_integration_tls_only_server_is_marked_without_nla() {
     let h = Harness::new();
     let mut s = h.connect(&profile(server.addr.port()), Some(PASSWORD), false);
     let connected = s.connected_accepting_certs().await;
-    let (_, kex, _) = info(&connected);
-    assert!(!kex.contains("NLA"), "{kex}");
+    let (_, auth, _) = info(&connected);
+    assert_eq!(auth, "logon");
     assert_color(s.frame_of_size(800, 600).await);
 }
 
@@ -984,7 +985,7 @@ async fn ssh_integration_rdp_over_jump_host_tunnel() {
     match connected {
         SessionEvent::Connected { info } => {
             assert_eq!(info.via, vec!["bastion".to_string()]);
-            assert!(info.kex.contains("NLA"), "{}", info.kex);
+            assert_eq!(info.cipher, "nla");
         }
         _ => unreachable!(),
     }

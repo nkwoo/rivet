@@ -7,7 +7,8 @@ mod core;
 mod error;
 #[cfg(test)]
 mod integration_tests;
-#[cfg(target_os = "macos")]
+// 메뉴는 macOS에서만 붙이지만, 언어 설정 명령이 `MenuLocale`을 쓰므로 모든 OS에서 컴파일합니다.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod menu;
 mod protocols;
 mod transfer;
@@ -49,13 +50,14 @@ pub fn run() -> Result<(), Error> {
             app.manage(state);
             #[cfg(target_os = "macos")]
             {
-                app.set_menu(menu::build(app.handle())?)?;
+                app.set_menu(menu::build(app.handle(), menu::MenuLocale::default())?)?;
                 app.on_menu_event(|app, event| menu::handle_event(app, event.id().as_ref()));
             }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::app::app_info,
+            commands::app::app_set_menu_locale,
             commands::profiles::profile_list,
             commands::profiles::profile_create,
             commands::profiles::profile_update,

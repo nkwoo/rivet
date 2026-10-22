@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, isApiError, toBytes, type Profile, type RdpInputEvent, type SessionEvent } from "../lib/api.ts";
 import { CertChanged, CertPrompt, HostKeyChanged, HostKeyPrompt } from "../security/HostKeyDialogs.tsx";
 import { SecretPrompt } from "../profiles/SecretPrompt.tsx";
+import { messages, useI18n } from "../i18n/index.ts";
 import {
   CheckIcon,
   ClipboardIcon,
@@ -36,24 +37,10 @@ interface RdpTabProps {
   onImmersive: (on: boolean) => void;
 }
 
-const ERROR_TEXT: Record<string, string> = {
-  connect: "서버에 연결할 수 없습니다",
-  timeout: "연결 시간이 초과되었습니다",
-  authFailed: "인증에 실패했습니다",
-  jumpAuthFailed: "점프 호스트 인증에 실패했습니다",
-  hostKeyChanged: "점프 호스트의 호스트 키가 바뀌어 연결을 차단했습니다",
-  hostKeyRejected: "점프 호스트의 호스트 키를 승인하지 않아 연결을 취소했습니다",
-  certChanged: "인증서가 바뀌어 연결을 차단했습니다",
-  certRejected: "인증서를 승인하지 않아 연결을 취소했습니다",
-  tls: "TLS 연결에 실패했습니다",
-  rdpNegotiation: "서버와 보안 방식을 협상하지 못했습니다",
-  rdpProtocol: "RDP 프로토콜 오류",
-  connectionLost: "연결이 끊어졌습니다",
-  secretStore: "키체인에 접근하지 못했습니다",
-};
-
+/** 오류 코드별 문구. RDP 전용 문구가 없으면 공통 연결 오류 문구를 씁니다. */
 function errorText(code: string, message: string): string {
-  const text = ERROR_TEXT[code];
+  const m = messages();
+  const text = m.rdp.errors[code] ?? m.session.errors[code];
   return text ? `${text} (${message})` : message;
 }
 
@@ -83,6 +70,7 @@ function desiredSize(profile: Profile, stage: HTMLElement | null) {
  * 키보드/마우스는 묶어서 순서대로 보냅니다. 키보드는 숨은 입력란이 받아 IME(한글 등) 조합을 지원합니다.
  */
 export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice, onImmersive }: RdpTabProps) {
+  const { m } = useI18n();
   /** 탭 전체 영역. 스크롤 막대의 영향을 받지 않아 원격 해상도 계산에 씀 (스크롤되는 화면 영역을 재면 크기가 계속 바뀜) */
   const root = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
@@ -123,7 +111,7 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
   /** 기본값: 원격 입력기, 한/영 키 (설정이 없는 프로필 포함) */
   const remoteIme = (profile.rdp?.keyboard ?? "remote") === "remote";
   const hangulKey = profile.rdp?.hangulKey ?? "lang1";
-  const [diag, setDiag] = useState<string>("측정 중…");
+  const [diag, setDiag] = useState<string>(() => messages().rdp.measuring);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [toolbarHidden, setToolbarHidden] = useState(false);
 
@@ -193,7 +181,10 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
           break;
         case "secretNotSaved":
           onNotice(
-            `${event.name ? `점프 호스트 ${event.name}` : profile.name}의 비밀번호를 키체인에 저장하지 못했습니다. 다음 접속 때 다시 입력해야 합니다. (${event.message})`,
+            messages().session.secretNotSaved(
+              event.name ? messages().common.jumpHost(event.name) : profile.name,
+              event.message,
+            ),
           );
           break;
         case "jumpAuthFailed":
@@ -221,8 +212,8 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
         case "clipboard":
           showToast(
             event.direction === "toRemote"
-              ? `클립보드 텍스트를 ${profile.name}에 보냈습니다`
-              : `${profile.name}에서 복사한 텍스트를 클립보드에 넣었습니다`,
+              ? messages().rdp.clipboardSent(profile.name)
+              : messages().rdp.clipboardReceived(profile.name),
           );
           break;
         case "error":
@@ -242,18 +233,18 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
               profileId: jumpFail.profileId,
               name: jumpFail.name,
               mode: "password",
-              error: "인증에 실패했습니다. 비밀번호를 확인하세요.",
+              error: messages().session.authFailedRetry,
             });
-            report({ kind: "error", message: "점프 호스트 인증 실패" });
+            report({ kind: "error", message: messages().session.jumpAuthFailed });
           } else if (err?.code === "authFailed") {
             pendingTarget.current = null;
-            setOverlay({ kind: "secret", error: `인증에 실패했습니다. 비밀번호를 확인하세요. (${err.message})` });
-            report({ kind: "error", message: "인증 실패" });
+            setOverlay({ kind: "secret", error: messages().rdp.authFailedRetry(err.message) });
+            report({ kind: "error", message: messages().session.authFailed });
           } else if (err) {
             if (err.code !== "certChanged" && err.code !== "hostKeyChanged") setOverlay({ kind: "none" });
             report({ kind: "error", message: errorText(err.code, err.message) });
           } else {
-            report({ kind: "closed", message: "원격 데스크톱 연결이 종료되었습니다." });
+            report({ kind: "closed", message: messages().rdp.ended });
           }
           break;
         }
@@ -328,10 +319,10 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
             name: e.message,
             mode: e.code === "jumpPassphraseRequired" ? "passphrase" : "password",
           });
-          report({ kind: "closed", message: "점프 호스트 비밀번호가 필요합니다" });
+          report({ kind: "closed", message: messages().rdp.jumpPasswordRequired });
         } else if (isApiError(e) && e.code === "passwordRequired") {
           setOverlay({ kind: "secret" });
-          report({ kind: "closed", message: "비밀번호가 필요합니다" });
+          report({ kind: "closed", message: messages().rdp.passwordRequired });
         } else {
           report({ kind: "error", message: isApiError(e) ? errorText(e.code, e.message) : String(e) });
         }
@@ -350,7 +341,7 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
     pendingTarget.current = null;
     jumpSecrets.current = {};
     setOverlay({ kind: "none" });
-    report({ kind: "closed", message: "연결 취소됨" });
+    report({ kind: "closed", message: messages().common.connectionCanceled });
   };
 
   const disconnect = useCallback(() => {
@@ -360,7 +351,7 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
     connectedSeen.current = false;
     setConnected(false);
     if (id) void api.sshClose(id);
-    report({ kind: "closed", message: "연결을 끊었습니다." });
+    report({ kind: "closed", message: messages().rdp.disconnected });
   }, [report]);
 
   // 최초 연결과 정리
@@ -434,8 +425,13 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
       const lag = [...st.inputLag].sort((a, b) => a - b);
       const lagText = lag.length ? `${Math.round(lag[Math.floor(lag.length / 2)] ?? 0)} ms` : "–";
       setDiag(
-        `${fps} fps · 그리기 평균 ${fps ? (st.drawMs / fps).toFixed(1) : "0.0"} ms (최대 ${st.drawMax.toFixed(1)}) · ` +
-          `수신 ${(st.bytes / 1024 / 1024).toFixed(1)} MiB/s · 입력→화면 ${lagText}`,
+        messages().rdp.diag(
+          fps,
+          fps ? (st.drawMs / fps).toFixed(1) : "0.0",
+          st.drawMax.toFixed(1),
+          (st.bytes / 1024 / 1024).toFixed(1),
+          lagText,
+        ),
       );
       stats.current = { bytes: 0, drawMs: 0, drawMax: 0, inputLag: [], inputAt: st.inputAt };
     }, 1000);
@@ -627,7 +623,7 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
     const next = !clipboard;
     setClipboard(next);
     if (session.current) void api.rdpClipboard(session.current, next).catch(() => {});
-    showToast(next ? "클립보드 공유를 켰습니다" : "클립보드 공유를 껐습니다");
+    showToast(next ? m.rdp.clipboardOn : m.rdp.clipboardOff);
     ime.current?.focus();
   };
 
@@ -642,7 +638,7 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
   })();
   const percent = desktop && canvasStyle.width ? Math.round((canvasStyle.width / (desktop.width / hidpiScale)) * 100) : 100;
 
-  const target = `${profile.username || "(사용자 없음)"}@${profile.host}:${profile.port}`;
+  const target = `${profile.username || m.rdp.noUser}@${profile.host}:${profile.port}`;
   const ended = !connected && status.kind !== "connecting";
 
   return (
@@ -658,7 +654,7 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
           className="rdp-canvas"
           hidden={!connected || !desktop}
           style={{ width: canvasStyle.width, height: canvasStyle.height }}
-          aria-label={`${profile.name} 원격 데스크톱`}
+          aria-label={m.rdp.canvas(profile.name)}
           onPointerMove={onPointerMove}
           onPointerDown={onPointerDown}
           onPointerUp={onPointerUp}
@@ -667,7 +663,7 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
         <textarea
           ref={ime}
           className="rdp-ime"
-          aria-label="원격 키보드 입력"
+          aria-label={m.rdp.keyboard}
           autoComplete="off"
           autoCorrect="off"
           autoCapitalize="off"
@@ -701,9 +697,9 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
             <MonitorIcon size={40} />
             <p className={status.kind === "error" ? "status-error" : "muted"}>
               {status.kind === "connecting"
-                ? `${target}에 연결하는 중…`
+                ? m.session.connectingTo(target)
                 : status.kind === "connected"
-                  ? "화면을 기다리는 중…"
+                  ? m.rdp.waitingScreen
                   : status.kind === "error" || status.kind === "closed"
                     ? status.message
                     : ""}
@@ -718,7 +714,7 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
                   void connect(null, false);
                 }}
               >
-                다시 연결
+                {m.common.reconnect}
               </button>
             )}
           </div>
@@ -728,7 +724,7 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
       {connected && (
         <div
           role="toolbar"
-          aria-label="원격 데스크톱 제어"
+          aria-label={m.rdp.toolbar}
           className={`rdp-toolbar ${toolbarHidden ? "is-hidden" : ""}`}
           onPointerEnter={() => setToolbarHidden(false)}
           // 툴바를 눌러도 키보드 포커스는 원격 입력란에 남김 (누른 뒤 바로 원격에 타이핑)
@@ -738,16 +734,16 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
           <button
             type="button"
             className="rdp-tool"
-            title={viewMode === "fit" ? "원본 크기로 보기" : "창에 맞춰 보기"}
-            onClick={() => setViewMode((m) => (m === "fit" ? "actual" : "fit"))}
+            title={viewMode === "fit" ? m.rdp.showActual : m.rdp.showFit}
+            onClick={() => setViewMode((v) => (v === "fit" ? "actual" : "fit"))}
           >
-            {viewMode === "fit" ? `창에 맞춤 ${percent}%` : "원본 크기"}
+            {viewMode === "fit" ? m.rdp.fit(percent) : m.rdp.actual}
           </button>
           <button
             type="button"
             className="rdp-tool rdp-tool-icon"
-            aria-label={fullscreen ? "전체 화면 끝내기" : "전체 화면"}
-            title={fullscreen ? "전체 화면 끝내기" : "전체 화면"}
+            aria-label={fullscreen ? m.rdp.exitFullscreen : m.rdp.fullscreen}
+            title={fullscreen ? m.rdp.exitFullscreen : m.rdp.fullscreen}
             onClick={() => setFullscreen((f) => !f)}
           >
             {fullscreen ? <ExitFullscreenIcon /> : <FullscreenIcon />}
@@ -755,16 +751,16 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
           <button
             type="button"
             className={`rdp-tool rdp-tool-icon ${clipboard ? "is-on" : ""}`}
-            aria-label="클립보드 공유"
+            aria-label={m.rdp.clipboard}
             aria-pressed={clipboard}
-            title={clipboard ? "클립보드 공유 켜짐 (텍스트)" : "클립보드 공유 꺼짐"}
+            title={clipboard ? m.rdp.clipboardOnTitle : m.rdp.clipboardOffTitle}
             onClick={toggleClipboard}
           >
             <ClipboardIcon />
           </button>
           {remoteIme && (
-            <button type="button" className="rdp-tool" title="원격 입력기 한/영 전환 (오른쪽 ⌘)" onClick={toggleHangul}>
-              한/영
+            <button type="button" className="rdp-tool" title={m.rdp.hangulTitle} onClick={toggleHangul}>
+              {m.rdp.hangul}
             </button>
           )}
           <button type="button" className="rdp-tool mono" onClick={ctrlAltDel}>
@@ -774,14 +770,14 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
             type="button"
             className={`rdp-tool ${diagnostics ? "is-on" : ""}`}
             aria-pressed={diagnostics}
-            title="화면 전송 성능 진단"
+            title={m.rdp.diagnosticsTitle}
             onClick={() => setDiagnostics((d) => !d)}
           >
-            진단
+            {m.rdp.diagnostics}
           </button>
           <span className="rdp-toolbar-sep" />
           <button type="button" className="rdp-tool rdp-tool-danger" onClick={disconnect}>
-            연결 끊기
+            {m.rdp.disconnect}
           </button>
           {diagnostics && (
             <div role="status" className="rdp-diag mono">
@@ -811,8 +807,8 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
       {active && overlay.kind === "jumpSecret" && (
         <SecretPrompt
           kind={overlay.mode}
-          name={`점프 호스트 ${overlay.name}`}
-          target={`${target} 경유`}
+          name={m.common.jumpHost(overlay.name)}
+          target={m.common.via(target)}
           error={overlay.error}
           onSubmit={(secret, save) => {
             jumpSecrets.current[overlay.profileId] = secret;
@@ -824,7 +820,7 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
       )}
       {active && overlay.kind === "hostKeyPrompt" && (
         <HostKeyPrompt
-          name={`점프 호스트 (${profile.name} 경유)`}
+          name={m.rdp.jumpHostVia(profile.name)}
           host={overlay.event.host}
           port={overlay.event.port}
           algorithm={overlay.event.algorithm}
@@ -835,7 +831,7 @@ export function RdpTab({ profile, active, onState, onReviewKnownHosts, onNotice,
       )}
       {active && overlay.kind === "hostKeyChanged" && (
         <HostKeyChanged
-          name={`점프 호스트 (${profile.name} 경유)`}
+          name={m.rdp.jumpHostVia(profile.name)}
           host={overlay.event.host}
           port={overlay.event.port}
           algorithm={overlay.event.algorithm}

@@ -1,6 +1,7 @@
 import { useRef, type FormEvent } from "react";
 import { Dialog } from "../components/Dialog.tsx";
 import { LockIcon } from "../components/Icons.tsx";
+import { useI18n } from "../i18n/index.ts";
 
 interface SecretPromptProps {
   kind: "password" | "passphrase";
@@ -17,7 +18,8 @@ interface SecretPromptProps {
 export function SecretPrompt({ kind, name, target, error, onSubmit, onCancel }: SecretPromptProps) {
   const input = useRef<HTMLInputElement>(null);
   const save = useRef<HTMLInputElement>(null);
-  const label = kind === "password" ? "비밀번호" : "키 패스프레이즈";
+  const { m } = useI18n();
+  const label = kind === "password" ? m.secret.password : m.secret.passphrase;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -30,7 +32,7 @@ export function SecretPrompt({ kind, name, target, error, onSubmit, onCancel }: 
 
   return (
     <Dialog
-      title={`${name} ${label}`}
+      title={m.secret.title(name, label)}
       icon={
         <span className="dialog-icon dialog-icon-info">
           <LockIcon />
@@ -40,10 +42,10 @@ export function SecretPrompt({ kind, name, target, error, onSubmit, onCancel }: 
       footer={
         <>
           <button type="button" className="button button-ghost" onClick={onCancel}>
-            취소
+            {m.common.cancel}
           </button>
           <button type="submit" form="secret-form" className="button button-primary">
-            연결
+            {m.common.connect}
           </button>
         </>
       }
@@ -56,7 +58,7 @@ export function SecretPrompt({ kind, name, target, error, onSubmit, onCancel }: 
         </label>
         <label className="checkbox">
           <input ref={save} type="checkbox" />
-          <span>시스템 키체인에 저장 (macOS 키체인 / Windows 자격 증명 관리자). 인증에 성공한 경우에만 저장합니다.</span>
+          <span>{m.secret.save}</span>
         </label>
         {error && (
           <p role="alert" className="form-error">

@@ -1,6 +1,7 @@
 /// 웹뷰에서 호출 가능한 앱 명령. capabilities/default.json에서 개별로 허용해야 실제로 호출됩니다.
 const COMMANDS: &[&str] = &[
     "app_info",
+    "app_set_menu_locale",
     "profile_list",
     "profile_create",
     "profile_update",

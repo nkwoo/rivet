@@ -1,4 +1,5 @@
 import { CloseIcon, PlusIcon } from "../components/Icons.tsx";
+import { useI18n } from "../i18n/index.ts";
 import { findPane, paneList, type PaneNode } from "./layout.ts";
 
 export interface TabInfo {
@@ -18,8 +19,9 @@ interface TabBarProps {
 }
 
 export function TabBar({ tabs, activeId, onSelect, onClose, onNew }: TabBarProps) {
+  const { m } = useI18n();
   return (
-    <div role="tablist" aria-label="열린 세션" className="tabbar">
+    <div role="tablist" aria-label={m.tabs.label} className="tabbar">
       {tabs.map((t) => {
         const selected = t.id === activeId;
         const panes = paneList(t.layout);
@@ -46,7 +48,7 @@ export function TabBar({ tabs, activeId, onSelect, onClose, onNew }: TabBarProps
             <button
               type="button"
               className="tab-close"
-              aria-label={`${profile.name} 탭 닫기`}
+              aria-label={m.tabs.close(profile.name)}
               onClick={() => onClose(t.id)}
             >
               <CloseIcon />
@@ -54,7 +56,7 @@ export function TabBar({ tabs, activeId, onSelect, onClose, onNew }: TabBarProps
           </div>
         );
       })}
-      <button type="button" className="tab-new" aria-label="새 연결" onClick={onNew}>
+      <button type="button" className="tab-new" aria-label={m.common.newConnection} onClick={onNew}>
         <PlusIcon />
       </button>
     </div>

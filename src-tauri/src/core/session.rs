@@ -464,11 +464,8 @@ pub fn prepare_rdp_request(
 }
 
 fn rdp_connection_info(info: &RdpConnectionInfo) -> ConnectionInfo {
-    let auth = if info.nla {
-        "NLA (CredSSP)"
-    } else {
-        "원격 로그인 화면"
-    };
+    // 인증 방식은 코드로 보내고 표시 문구는 프론트엔드가 언어에 맞게 붙입니다.
+    let auth = if info.nla { "nla" } else { "logon" };
     ConnectionInfo {
         transport: if info.trust == CertTrust::Pinned {
             "tlsPinned"
@@ -476,8 +473,8 @@ fn rdp_connection_info(info: &RdpConnectionInfo) -> ConnectionInfo {
             "tlsCa"
         }
         .into(),
-        kex: format!("RDP {} · {auth}", info.tls_version),
-        cipher: String::new(),
+        kex: format!("RDP {}", info.tls_version),
+        cipher: auth.into(),
         host_key_algorithm: "X.509".into(),
         fingerprint: info.fingerprint.clone(),
         via: Vec::new(),

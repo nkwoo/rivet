@@ -148,6 +148,7 @@ pub struct ConnectionInfo {
     /// 보안 상태 종류: `ssh`, `tlsCa`(인증 기관으로 검증), `tlsPinned`(고정 지문), `plain`(암호화 없음)
     pub transport: String,
     pub kex: String,
+    /// SSH는 암호화 알고리즘, RDP는 인증 방식 코드(`nla` 또는 `logon`), FTP는 비어 있음
     pub cipher: String,
     pub host_key_algorithm: String,
     pub fingerprint: String,

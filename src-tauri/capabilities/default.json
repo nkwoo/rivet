@@ -5,6 +5,7 @@
   "windows": ["main"],
   "permissions": [
     "allow-app-info",
+    "allow-app-set-menu-locale",
     "allow-profile-list",
     "allow-profile-create",
     "allow-profile-update",
