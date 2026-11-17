@@ -19,6 +19,10 @@ ignore = [
   # 사용하지만 정식 릴리스가 없어 계속 보고됨. rsa 0.10 정식 출시 후 예외를 제거할 것.
   # (russh 도입 전에는 "advisory-not-detected" 경고만 출력됨)
   { id = "RUSTSEC-2023-0071", reason = "russh uses constant-time rsa 0.10 RC; no stable fix release yet" },
+  # pin-utils 유지보수 중단 (취약점 아님). IronRDP → sspi → async-dnssd 경로로만 들어오며
+  # IronRDP main(2026-11-17)도 sspi 0.23.1로 같은 경로를 유지. 대체 버전이 없으므로 예외 처리하고,
+  # sspi/async-dnssd가 의존을 제거하면 이 항목을 지웁니다.
+  { id = "RUSTSEC-2026-0441", reason = "unmaintained only; pulled in via IronRDP -> sspi -> async-dnssd, no upstream replacement yet" },
 ]
 
 [licenses]
