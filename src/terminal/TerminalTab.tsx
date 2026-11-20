@@ -60,6 +60,10 @@ const THEME = {
   cursor: "#E8E6E1",
   cursorAccent: "#0B0D10",
   selectionBackground: "#3A414B",
+  // xterm 6부터 자체 스크롤바를 그리므로 Steel 계열로 맞춤
+  scrollbarSliderBackground: "rgba(58, 65, 75, 0.6)",
+  scrollbarSliderHoverBackground: "rgba(58, 65, 75, 0.85)",
+  scrollbarSliderActiveBackground: "rgba(90, 98, 110, 0.9)",
   black: "#1A1D22",
   red: "#E5735A",
   green: "#8FCB9B",
