@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # 새 보안 권고는 코드 변경 없이도 나오므로 매일 공급망 검사만 돌립니다 (KST 09:17).
+  # 실패하면 GitHub가 이 워크플로의 cron을 마지막으로 수정한 사용자에게 알림을 보냅니다.
+  schedule:
+    - cron: "17 0 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -19,6 +24,7 @@ env:
 jobs:
   build:
     name: Build & test (${{ matrix.os }})
+    if: github.event_name != 'schedule'
     strategy:
       fail-fast: false
       matrix:
@@ -80,6 +86,7 @@ jobs:
 
   ssh-integration:
     name: SSH/FTP integration (Docker OpenSSH, vsftpd)
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
