@@ -23,6 +23,9 @@ ignore = [
   # IronRDP main(2026-11-17)도 sspi 0.23.1로 같은 경로를 유지. 대체 버전이 없으므로 예외 처리하고,
   # sspi/async-dnssd가 의존을 제거하면 이 항목을 지웁니다.
   { id = "RUSTSEC-2026-0441", reason = "unmaintained only; pulled in via IronRDP -> sspi -> async-dnssd, no upstream replacement yet" },
+  # chrono 유지보수 중단 (취약점 아님, 패치 버전 없음). russh(russh-util), russh-sftp, suppaftp가
+  # 직접 의존하므로 앱에서 뺄 수 없습니다. 상류가 jiff/time으로 옮기면 이 항목을 지웁니다.
+  { id = "RUSTSEC-2026-0543", reason = "unmaintained only; direct dependency of russh-util, russh-sftp and suppaftp" },
 ]
 
 [licenses]
