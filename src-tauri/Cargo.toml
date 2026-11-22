@@ -53,7 +53,7 @@ uuid = { version = "1.28.0", features = ["v4", "serde"] }
 ironrdp = { git = "https://github.com/Devolutions/IronRDP", rev = "62246b364a0282bab85087f658a81fe4207b6b31", features = ["connector", "session", "graphics", "input", "cliprdr", "dvc", "displaycontrol", "svc"] }
 ironrdp-tokio = { git = "https://github.com/Devolutions/IronRDP", rev = "62246b364a0282bab85087f658a81fe4207b6b31" }
 # RDP 서버 인증서에서 CredSSP에 쓸 공개 키를 꺼냅니다.
-x509-cert = "0.2"
+x509-cert = "0.3"
 # RDP 텍스트 클립보드 공유 (웹뷰 대신 백엔드에서 OS 클립보드 접근)
 arboard = { version = "3.7.0", default-features = false }
 
